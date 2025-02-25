@@ -1,0 +1,3 @@
+[submodule "OpenToshi"]
+	path = OpenToshi
+	url = https://github.com/InfiniteC0re/OpenBarnyard
