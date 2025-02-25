@@ -11,7 +11,9 @@ IncludeDir.bink = "%{wks.location}/OpenToshi/Toshi/Vendor/bink/include"
 IncludeDir.detours = "%{wks.location}/OpenToshi/SDK/Vendor/Detours/include"
 IncludeDir.glm = "%%{wks.location}/OpenToshi/Toshi/Vendor/glm/include"
 IncludeDir.glew = "%{wks.location}/OpenToshi/Toshi/Vendor/glew/include"
+IncludeDir.sdl2 = "%{wks.location}/OpenToshi/Toshi/Vendor/sdl2/include"
 IncludeDir.toshi = "%{wks.location}/OpenToshi/Toshi/Source"
+IncludeDir.imgui = "%{wks.location}/ThirdParty/ImGui"
 
 LibDir = {}
 LibDir.fmod = "%{wks.location}/OpenToshi/Toshi/Vendor/fmod/lib"

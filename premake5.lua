@@ -70,5 +70,9 @@ workspace "ToshiResourceViewer"
 
 -- Include the projects
 
-include "OpenToshi/Toshi"
-include "ToshiResourceViewer"
+group "Main"
+	include "OpenToshi/Toshi"
+	include "ToshiResourceViewer"
+	
+group "ThirdParty"
+	include "ThirdParty/ImGui"

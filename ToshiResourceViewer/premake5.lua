@@ -8,7 +8,11 @@ project "ToshiResourceViewer"
 	
 	links
 	{
-		"Toshi"
+		"Toshi",
+		"ImGui",
+		"SDL2.lib",
+		"opengl32.lib",
+		"glew32s.lib"
 	}
 	
 	files
@@ -16,14 +20,25 @@ project "ToshiResourceViewer"
 		"Source/**.h",
 		"Source/**.cpp",
 	}
+			
+	libdirs
+	{
+		"%{LibDir.sdl2}",
+		"%{LibDir.glew}"
+	}
 
 	includedirs
 	{
 		"Source",
 		"%{IncludeDir.toshi}",
+		"%{IncludeDir.sdl2}",
+		"%{IncludeDir.glm}",
+		"%{IncludeDir.glew}",
+		"%{IncludeDir.imgui}"
 	}
 
 	defines
 	{
-		"TOSHI_CONSOLE"
+		"TOSHI_CONSOLE",
+		"SDL_MAIN_HANDLED"
 	}
