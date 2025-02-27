@@ -2,6 +2,8 @@
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
+#include "ImGuiFileDialog.h"
+#include "WindowManager.h"
 
 #include <Toshi/Toshi.h>
 #include <Toshi/TApplication.h>
@@ -54,6 +56,8 @@ public:
 		T2Window* pWindow = pRender->GetWindow();
 		pWindow->SetListener( this );
 
+		WindowManager::CreateSingleton();
+
 		// Initialise ImGui
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
@@ -85,8 +89,99 @@ public:
 		ImGui_ImplSDL2_NewFrame();
 		ImGui::NewFrame();
 
-		TBOOL bShowDemoWindow = TTRUE;
-		ImGui::ShowDemoWindow( &bShowDemoWindow );
+		// Create main dock space
+		ImGuiViewport* imViewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos( imViewport->Pos );
+		ImGui::SetNextWindowSize( imViewport->Size );
+		ImGui::SetNextWindowViewport( imViewport->ID );
+
+		ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_MenuBar;
+		window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+		window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+
+		ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+		ImGui::Begin( "DockSpace", TNULL, window_flags );
+		ImGui::PopStyleVar();
+
+		ImGuiID dockspaceId = ImGui::GetID( "MainDockspace" );
+		ImGui::DockSpace( dockspaceId );
+
+		if ( ImGui::BeginMainMenuBar() )
+		{
+			if ( ImGui::BeginMenu( "File" ) )
+			{
+				if ( ImGui::MenuItem( "Open..." ) )
+				{
+					IGFD::FileDialogConfig config;
+					config.path = ".";
+					
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", ".trb,.ttl,.trz", config );
+				}
+
+				ImGui::EndMenu();
+			}
+
+			if ( ImGui::BeginMenu( "Batch" ) )
+			{
+				if ( ImGui::MenuItem( "Decompress files..." ) )
+				{
+					IGFD::FileDialogConfig config;
+					config.countSelectionMax = 0;
+					config.path              = ".";
+
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", ".trb,.ttl,.trz", config );
+				}
+
+				ImGui::EndMenu();
+			}
+
+			ImGui::EndMainMenuBar();
+		}
+
+		if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFile" ) )
+		{
+			if ( ImGuiFileDialog::Instance()->IsOk() )
+			{
+				std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+				std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
+
+				TRBFileWindow* pFileWindow = new TRBFileWindow();
+				TBOOL          bLoaded     = pFileWindow->LoadFile( filePathName.c_str() );
+
+				if ( !bLoaded )
+				{
+					delete pFileWindow;
+					pFileWindow = TNULL;
+				}
+
+				WindowManager::GetSingleton()->AddWindow( pFileWindow );
+			}
+
+			// close
+			ImGuiFileDialog::Instance()->Close();
+		}
+
+
+		if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFiles" ) )
+		{
+			if ( ImGuiFileDialog::Instance()->IsOk() )
+			{
+				auto selections = ImGuiFileDialog::Instance()->GetSelection();
+
+				for ( auto& selection : selections )
+				{
+					PTRB file( selection.second );
+					file.WriteToFile( selection.second, TFALSE );
+				}
+			}
+
+			// close
+			ImGuiFileDialog::Instance()->Close();
+		}
+
+		WindowManager::GetSingleton()->Render();
+		
+		ImGui::End();
 
 		// Render to the window
 		pRender->BeginScene();
@@ -111,7 +206,7 @@ public:
 int main( int argc, char** argv )
 {
 	// Allocate memory for the allocator
-	TMemory::Initialise( 8 * 1024 * 1024, 0 );
+	TMemory::Initialise( 64 * 1024 * 1024, 0 );
 
 	// Initialise engine
 	TUtil::TOSHIParams engineParams;
