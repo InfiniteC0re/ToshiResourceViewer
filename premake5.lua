@@ -25,7 +25,7 @@ workspace "ToshiResourceViewer"
 	defines
 	{
 		"_CRT_SECURE_NO_WARNINGS",
-	--	"TMEMORY_USE_DLMALLOC",
+		"TMEMORY_USE_DLMALLOC",
 	--	"TOSHI_PROFILER",
 	--	"TOSHI_PROFILER_MEMORY",
 	--	"TRACY_ENABLE"

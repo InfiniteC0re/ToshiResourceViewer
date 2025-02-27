@@ -206,7 +206,7 @@ public:
 int main( int argc, char** argv )
 {
 	// Allocate memory for the allocator
-	TMemory::Initialise( 64 * 1024 * 1024, 0 );
+	TMemory::Initialise( 0, 0, TMemoryDL::Flags_NativeMethods );
 
 	// Initialise engine
 	TUtil::TOSHIParams engineParams;
