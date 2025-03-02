@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "WindowManager.h"
+#include "TRBWindowManager.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -9,21 +9,21 @@
 
 TOSHI_NAMESPACE_USING
 
-WindowManager::WindowManager()
+TRBWindowManager::TRBWindowManager()
 {
 }
 
-WindowManager::~WindowManager()
+TRBWindowManager::~TRBWindowManager()
 {
 }
 
-void WindowManager::AddWindow( TRBFileWindow* pWindow )
+void TRBWindowManager::AddWindow( TRBFileWindow* pWindow )
 {
 	if ( pWindow )
 		m_vecWindows.PushBack( pWindow );
 }
 
-void WindowManager::Render()
+void TRBWindowManager::Render()
 {
 	T2_FOREACH( m_vecWindows, it )
 	{

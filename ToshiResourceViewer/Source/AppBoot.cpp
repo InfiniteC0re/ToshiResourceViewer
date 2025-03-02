@@ -1,9 +1,10 @@
 #include "pch.h"
+
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 #include "ImGuiFileDialog.h"
-#include "WindowManager.h"
+#include "TRB/TRBWindowManager.h"
 
 #include <Toshi/Toshi.h>
 #include <Toshi/TApplication.h>
@@ -17,6 +18,14 @@
 #include <Core/TMemoryDebugOn.h>
 
 TOSHI_NAMESPACE_USING
+
+static struct MemoryInitialiser
+{
+	MemoryInitialiser()
+	{
+		TMemory::Initialise( 0, 0, TMemoryDL::Flags_NativeMethods );
+	}
+} g_oMemInitialiser;
 
 class Application
     : public TApplication
@@ -56,7 +65,7 @@ public:
 		T2Window* pWindow = pRender->GetWindow();
 		pWindow->SetListener( this );
 
-		WindowManager::CreateSingleton();
+		TRBWindowManager::CreateSingleton();
 
 		// Initialise ImGui
 		IMGUI_CHECKVERSION();
@@ -154,13 +163,12 @@ public:
 					pFileWindow = TNULL;
 				}
 
-				WindowManager::GetSingleton()->AddWindow( pFileWindow );
+				TRBWindowManager::GetSingleton()->AddWindow( pFileWindow );
 			}
 
 			// close
 			ImGuiFileDialog::Instance()->Close();
 		}
-
 
 		if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFiles" ) )
 		{
@@ -170,8 +178,8 @@ public:
 
 				for ( auto& selection : selections )
 				{
-					PTRB file( selection.second );
-					file.WriteToFile( selection.second, TFALSE );
+					PTRB file( selection.second.c_str() );
+					file.WriteToFile( selection.second.c_str(), TFALSE );
 				}
 			}
 
@@ -179,7 +187,7 @@ public:
 			ImGuiFileDialog::Instance()->Close();
 		}
 
-		WindowManager::GetSingleton()->Render();
+		TRBWindowManager::GetSingleton()->Render();
 		
 		ImGui::End();
 
@@ -205,9 +213,6 @@ public:
 
 int main( int argc, char** argv )
 {
-	// Allocate memory for the allocator
-	TMemory::Initialise( 0, 0, TMemoryDL::Flags_NativeMethods );
-
 	// Initialise engine
 	TUtil::TOSHIParams engineParams;
 	engineParams.szLogAppName  = "TRV";

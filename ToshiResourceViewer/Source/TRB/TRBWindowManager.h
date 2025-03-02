@@ -3,12 +3,12 @@
 
 #include <ToshiTools/T2DynamicVector.h>
 
-class WindowManager
-    : public Toshi::TSingleton<WindowManager>
+class TRBWindowManager
+    : public Toshi::TSingleton<TRBWindowManager>
 {
 public:
-	WindowManager();
-	~WindowManager();
+	TRBWindowManager();
+	~TRBWindowManager();
 
 	void AddWindow( TRBFileWindow* pWindow );
 	void Render();
