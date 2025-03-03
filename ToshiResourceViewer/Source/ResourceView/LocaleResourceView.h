@@ -1,5 +1,6 @@
 #pragma once
 #include "TRB/TRBResourceView.h"
+#include "ImGuiUtils.h"
 
 #include <ToshiTools/T2DynamicVector.h>
 #include <Toshi/T2SortedVector.h>
@@ -18,6 +19,7 @@ public:
 
 private:
 	struct LocaleString
+	    : public ImGuiUtils::ImGuiComponent
 	{
 		TINT            iIndex;
 		Toshi::TString8 strLocalised;

@@ -194,15 +194,20 @@ public:
 		// Render to the window
 		pRender->BeginScene();
 
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
+
+		if ( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
+		{
+			SDL_Window*   backup_current_window  = SDL_GL_GetCurrentWindow();
+			SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
+			ImGui::UpdatePlatformWindows();
+			ImGui::RenderPlatformWindowsDefault();
+			SDL_GL_MakeCurrent( backup_current_window, backup_current_context );
+		}
+
 		SDL_Window*   backup_current_window  = SDL_GL_GetCurrentWindow();
 		SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
-		
-		ImGui::Render();
-		ImGui::UpdatePlatformWindows();
-		ImGui::RenderPlatformWindowsDefault();
-
-		ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
-		SDL_GL_MakeCurrent( backup_current_window, backup_current_context );
 
 		pRender->EndScene();
 

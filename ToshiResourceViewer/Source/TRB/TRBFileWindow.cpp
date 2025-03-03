@@ -72,7 +72,10 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFilePath )
 
 void TRBFileWindow::Render()
 {
-	ImGui::Begin( m_strWindowName, &m_bHidden );
+	if ( !m_bVisible )
+		return;
+
+	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
 
 	if ( m_pFile )
 	{
@@ -127,6 +130,11 @@ void TRBFileWindow::Render()
 	}
 
 	ImGui::End();
+}
+
+TBOOL TRBFileWindow::Update()
+{
+	return m_bVisible;
 }
 
 void TRBFileWindow::UnloadFile()

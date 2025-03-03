@@ -23,26 +23,6 @@ LocaleResourceView::~LocaleResourceView()
 {
 }
 
-std::string WstrToUtf8Str( const std::wstring& wstr )
-{
-	std::string retStr;
-	if ( !wstr.empty() )
-	{
-		int sizeRequired = WideCharToMultiByte( CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL );
-
-		if ( sizeRequired > 0 )
-		{
-			std::vector<char> utf8String( sizeRequired );
-			int               bytesConverted = WideCharToMultiByte( CP_UTF8, 0, wstr.c_str(), -1, &utf8String[ 0 ], utf8String.size(), NULL, NULL );
-			if ( bytesConverted != 0 )
-			{
-				retStr = &utf8String[ 0 ];
-			}
-		}
-	}
-	return retStr;
-}
-
 TBOOL LocaleResourceView::OnCreate()
 {
 	T2Locale::LocaleStrings* pLocaleStrings = TSTATICCAST( T2Locale::LocaleStrings, m_pData );
@@ -53,7 +33,7 @@ TBOOL LocaleResourceView::OnCreate()
 		{
 			LocaleString* pString = new LocaleString();
 			pString->iIndex       = i;
-			pString->strLocalised = WstrToUtf8Str( pLocaleStrings->Strings[ i ] ).c_str();
+			pString->strLocalised = ImGuiUtils::UnicodeToUTF8( pLocaleStrings->Strings[ i ] );
 
 			m_vecStrings.Push( pString );
 		}
@@ -81,8 +61,13 @@ void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 	T2_FOREACH( m_vecStrings, it )
 	{
 		LocaleString* pString = *it;
+
+		pString->PreRender();
 		ImGui::Text( "%d", pString->iIndex );
 		ImGui::SameLine();
-		ImGui::Text( pString->strLocalised.GetString() );
+
+		ImGui::PushItemWidth( -1.0f );
+		ImGuiUtils::InputText( "##Localised", pString->strLocalised );
+		pString->PostRender();
 	}
 }

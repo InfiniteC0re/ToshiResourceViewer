@@ -27,7 +27,18 @@ void TRBWindowManager::Render()
 {
 	T2_FOREACH( m_vecWindows, it )
 	{
-		( *it )->Render();
+		TRBFileWindow* pWindow = *it;
+		TBOOL          bValid  = pWindow->Update();
+
+		if ( !bValid )
+		{
+			delete pWindow;
+			m_vecWindows.EraseFast( it );
+			it--;
+			continue;
+		}
+
+		pWindow->Render();
 	}
 }
 

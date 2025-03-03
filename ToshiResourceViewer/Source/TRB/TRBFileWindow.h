@@ -15,6 +15,7 @@ public:
 	TBOOL LoadFile( Toshi::T2ConstString8 strFilePath );
 
 	void Render();
+	TBOOL Update();
 
 private:
 	void UnloadFile();
@@ -27,7 +28,7 @@ private:
 	// Vector of all resource views bound to this file
 	Toshi::T2DynamicVector<TRBResourceView*> m_vecResourceViews;
 
-	TBOOL m_bHidden         = TFALSE;
+	TBOOL m_bVisible        = TTRUE;
 	TBOOL m_bShowSymbols    = TFALSE;
 	TBOOL m_bUseCompression = TFALSE;
 };

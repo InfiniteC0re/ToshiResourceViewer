@@ -39,7 +39,7 @@ void TRBResourceView::Destroy()
 {
 	if ( this )
 	{
-		delete this;
 		OnDestroy();
+		delete this;
 	}
 }
