@@ -21,12 +21,19 @@ TRBFileWindow::~TRBFileWindow()
 	UnloadFile();
 }
 
-TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFileName )
+TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFilePath )
 {
 	UnloadFile();
 	m_pFile = new PTRB;
 
-	m_strFilePath   = strFileName;
+	m_strFilePath = strFilePath;
+	FixPathSlashes( m_strFilePath );
+
+	TINT     iLastSlashIndex = m_strFilePath.FindReverse( '\\' );
+	TString8 strFileName     = ( iLastSlashIndex != -1 ) ? TString8( m_strFilePath.GetString( iLastSlashIndex + 1 ) ) : m_strFilePath;
+
+	m_strWindowName = TString8::VarArgs( "%s##%u", strFileName.GetString(), GetImGuiID() );
+
 	TBOOL bReadFile = m_pFile->ReadFromFile( m_strFilePath.GetString() );
 
 	if ( bReadFile )
@@ -65,12 +72,14 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFileName )
 
 void TRBFileWindow::Render()
 {
-	ImGui::Begin( m_strFilePath, &m_bHidden );
+	ImGui::Begin( m_strWindowName, &m_bHidden );
 
 	if ( m_pFile )
 	{
 		if ( ImGui::BeginTabBar( "TRBFileTabBar" ) )
 		{
+			ImGuiComponent::PreRender();
+
 			// Render general tab containing basic info about TRB file
 			if ( ImGui::BeginTabItem( "TRB File" ) )
 			{
@@ -102,14 +111,17 @@ void TRBFileWindow::Render()
 			{
 				TRBResourceView* pResourceView = *it;
 
+				pResourceView->PreRender();
 				if ( ImGui::BeginTabItem( pResourceView->GetName() ) )
 				{
 					pResourceView->OnRender( 0.0f );
 
 					ImGui::EndTabItem();
 				}
+				pResourceView->PostRender();
 			}
 
+			ImGuiComponent::PostRender();
 			ImGui::EndTabBar();
 		}
 	}

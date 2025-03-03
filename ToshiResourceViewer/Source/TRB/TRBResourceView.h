@@ -1,10 +1,12 @@
 #pragma once
 #include "TRBSymbol.h"
+#include "ImGuiUtils.h"
 
 #include <Toshi/T2String.h>
 #include <Plugins/PTRB.h>
 
 class TRBResourceView
+    : public ImGuiUtils::ImGuiComponent
 {
 public:
 	TRBResourceView();
