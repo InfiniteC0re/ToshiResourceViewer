@@ -38,5 +38,7 @@ private:
 		}
 	};
 
-	Toshi::T2SortedVector<LocaleString*, Toshi::T2DynamicVector<LocaleString*>, LocaleStringSort> m_vecStrings;
+	using VectorOfStrings = Toshi::T2SortedVector<LocaleString*, Toshi::T2DynamicVector<LocaleString*>, LocaleStringSort>;
+
+	VectorOfStrings m_vecStrings;
 };

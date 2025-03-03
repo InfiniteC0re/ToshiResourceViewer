@@ -118,7 +118,6 @@ void TRBFileWindow::Render()
 				if ( ImGui::BeginTabItem( pResourceView->GetName() ) )
 				{
 					pResourceView->OnRender( 0.0f );
-
 					ImGui::EndTabItem();
 				}
 				pResourceView->PostRender();

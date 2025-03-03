@@ -17,11 +17,14 @@ TBOOL InputText( Toshi::T2ConstString8 label, Toshi::TString8& string, ImGuiInpu
 
 struct ImGuiComponent
 {
-	ImGuiID uiComponentID = GetComponentID();
+	ImGuiComponent( ImGuiID uiOffset = 1 )
+	    : uiComponentID( GetComponentID( uiOffset ) ) {}
 
 	ImGuiID GetImGuiID() const { return uiComponentID; }
-	void    PreRender() const;
-	void    PostRender() const;
+	void    PreRender( ImGuiID uiIndex = 0 ) const;
+	void    PostRender( ImGuiID uiIndex = 0 ) const;
+	
+	ImGuiID uiComponentID;
 };
 
 }

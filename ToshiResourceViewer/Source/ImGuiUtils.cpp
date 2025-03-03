@@ -68,12 +68,12 @@ TBOOL ImGuiUtils::InputText( Toshi::T2ConstString8 label, Toshi::TString8& strin
 	);
 }
 
-void ImGuiUtils::ImGuiComponent::PreRender() const
+void ImGuiUtils::ImGuiComponent::PreRender( ImGuiID uiIndex ) const
 {
-	ImGui::PushID( uiComponentID );
+	ImGui::PushID( uiComponentID + uiIndex );
 }
 
-void ImGuiUtils::ImGuiComponent::PostRender() const
+void ImGuiUtils::ImGuiComponent::PostRender( ImGuiID uiIndex ) const
 {
 	ImGui::PopID();
 }

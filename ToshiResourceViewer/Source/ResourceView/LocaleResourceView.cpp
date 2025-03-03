@@ -58,16 +58,51 @@ void LocaleResourceView::OnDestroy()
 
 void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 {
+	LocaleString* pReOrder1 = TNULL;
+	LocaleString* pReOrder2 = TNULL;
+	
 	T2_FOREACH( m_vecStrings, it )
 	{
 		LocaleString* pString = *it;
 
 		pString->PreRender();
-		ImGui::Text( "%d", pString->iIndex );
+		TINT iOldIndex = pString->iIndex;
+		TINT iNewIndex = iOldIndex;
+
+		ImGui::PushItemWidth( 40.0f );
+		ImGui::LabelText( "##ID", "%d", pString->iIndex );
 		ImGui::SameLine();
 
+		if ( ImGui::Button( "Down" ) ) iNewIndex--;
+		ImGui::SameLine();
+		if ( ImGui::Button( "Up" ) ) iNewIndex++;
+
+		if ( iNewIndex != iOldIndex )
+		{
+			pString->iIndex = iNewIndex;
+			
+			if ( pString->iIndex < 0 )
+				pString->iIndex = 0;
+			else if ( iNewIndex < m_vecStrings.Size() )
+			{
+				m_vecStrings[ iNewIndex ]->iIndex = iOldIndex;
+				pString->iIndex                   = iNewIndex;
+
+				pReOrder1 = *it;
+				pReOrder2 = m_vecStrings[ iNewIndex ];
+			}
+		}
+
+		ImGui::SameLine();
 		ImGui::PushItemWidth( -1.0f );
 		ImGuiUtils::InputText( "##Localised", pString->strLocalised );
+
 		pString->PostRender();
 	}
+
+	if ( pReOrder1 )
+		m_vecStrings.ReInsert( pReOrder1 );
+
+	if ( pReOrder2 )
+		m_vecStrings.ReInsert( pReOrder2 );
 }
