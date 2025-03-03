@@ -16,7 +16,7 @@ TOSHI_NAMESPACE_USING
 
 LocaleResourceView::LocaleResourceView()
 {
-	m_strName = "Locale";
+	m_strName = "Localisation";
 }
 
 LocaleResourceView::~LocaleResourceView()
@@ -25,6 +25,8 @@ LocaleResourceView::~LocaleResourceView()
 
 TBOOL LocaleResourceView::OnCreate()
 {
+	TRBResourceView::OnCreate();
+
 	T2Locale::LocaleStrings* pLocaleStrings = TSTATICCAST( T2Locale::LocaleStrings, m_pData );
 
 	if ( pLocaleStrings )
@@ -60,7 +62,12 @@ void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 {
 	LocaleString* pReOrder1 = TNULL;
 	LocaleString* pReOrder2 = TNULL;
-	
+
+	// Draw header
+	ImGui::PushItemWidth( 40.0f );
+	ImGui::Text( "ID" );
+
+	// Draw the localisation strings
 	T2_FOREACH( m_vecStrings, it )
 	{
 		LocaleString* pString = *it;
@@ -73,9 +80,9 @@ void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 		ImGui::LabelText( "##ID", "%d", pString->iIndex );
 		ImGui::SameLine();
 
-		if ( ImGui::Button( "Down" ) ) iNewIndex--;
+		if ( ImGui::Button( "Down" ) ) iNewIndex++;
 		ImGui::SameLine();
-		if ( ImGui::Button( "Up" ) ) iNewIndex++;
+		if ( ImGui::Button( "Up" ) ) iNewIndex--;
 
 		if ( iNewIndex != iOldIndex )
 		{

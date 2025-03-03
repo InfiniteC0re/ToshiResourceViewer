@@ -17,6 +17,14 @@ TRBResourceView::~TRBResourceView()
 {
 }
 
+TBOOL TRBResourceView::OnCreate()
+{
+	// Create unique name
+	m_strNameId.Format( "%s##%u", m_strName.Get(), GetImGuiID() );
+
+	return TTRUE;
+}
+
 TBOOL TRBResourceView::CanSave()
 {
 	return TFALSE;

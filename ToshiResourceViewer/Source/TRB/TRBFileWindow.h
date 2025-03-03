@@ -25,6 +25,8 @@ private:
 	Toshi::TString8 m_strFilePath;
 	PTRB*           m_pFile;
 
+	Toshi::T2FormatString128 m_strTRBInfoTabName;
+
 	// Vector of all resource views bound to this file
 	Toshi::T2DynamicVector<TRBResourceView*> m_vecResourceViews;
 

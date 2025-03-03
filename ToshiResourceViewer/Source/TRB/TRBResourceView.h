@@ -12,7 +12,7 @@ public:
 	TRBResourceView();
 	virtual ~TRBResourceView();
 
-	virtual TBOOL OnCreate()                     = 0;
+	virtual TBOOL OnCreate();
 	virtual void  OnDestroy()                    = 0;
 	virtual void  OnRender( TFLOAT flDeltaTime ) = 0;
 	virtual TBOOL CanSave();
@@ -22,10 +22,12 @@ public:
 	void  Destroy();
 
 	Toshi::T2ConstString8 GetName() const { return m_strName; }
+	Toshi::T2ConstString8 GetNameId() const { return m_strNameId.Get(); }
 
 protected:
-	Toshi::T2ConstString8 m_strName = "Resource View";
-	PTRB*                 m_pTRB;   // optional pointer to the TRB file
-	void*                 m_pData;  // optional pointer to the data of this linked symbol
-	TRBSymbol*            m_pOwner; // pointer to the registered symbol that is capable of creating this view
+	Toshi::T2ConstString8   m_strName = "Resource View";
+	Toshi::T2FormatString64 m_strNameId;
+	PTRB*                   m_pTRB;   // optional pointer to the TRB file
+	void*                   m_pData;  // optional pointer to the data of this linked symbol
+	TRBSymbol*              m_pOwner; // pointer to the registered symbol that is capable of creating this view
 };

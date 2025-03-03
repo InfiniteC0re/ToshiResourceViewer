@@ -33,6 +33,9 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFilePath )
 	TString8 strFileName     = ( iLastSlashIndex != -1 ) ? TString8( m_strFilePath.GetString( iLastSlashIndex + 1 ) ) : m_strFilePath;
 
 	m_strWindowName = TString8::VarArgs( "%s##%u", strFileName.GetString(), GetImGuiID() );
+	
+	// Setup tab names
+	m_strTRBInfoTabName.Format( "%s##%u", "TRB Information", GetImGuiID() );
 
 	TBOOL bReadFile = m_pFile->ReadFromFile( m_strFilePath.GetString() );
 
@@ -75,60 +78,57 @@ void TRBFileWindow::Render()
 	if ( !m_bVisible )
 		return;
 
+	ImGuiComponent::PreRender();
+	ImGuiID uiDockSpaceID = ImGui::GetID( m_strWindowName.GetString() );
 	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
+	ImGui::DockSpace( uiDockSpaceID );
 
 	if ( m_pFile )
 	{
-		if ( ImGui::BeginTabBar( "TRBFileTabBar" ) )
+		// Render general tab containing basic info about TRB file
+		ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Once );
+		ImGui::Begin( m_strTRBInfoTabName.Get() );
 		{
-			ImGuiComponent::PreRender();
+			PTRBSymbols* pSybmols     = m_pFile->GetSymbols();
+			TUINT        uiNumSymbols = pSybmols->GetCount();
 
-			// Render general tab containing basic info about TRB file
-			if ( ImGui::BeginTabItem( "TRB File" ) )
+			ImGui::Checkbox( "Use Compression", &m_bUseCompression );
+			if ( ImGui::Button( "Save File" ) )
+				m_pFile->WriteToFile( m_strFilePath.GetString(), m_bUseCompression );
+
+			ImGui::Separator();
+
+			ImGui::Checkbox( "Show Symbols", &m_bShowSymbols );
+			if ( m_bShowSymbols )
 			{
-				PTRBSymbols* pSybmols     = m_pFile->GetSymbols();
-				TUINT        uiNumSymbols = pSybmols->GetCount();
+				ImGui::Text( "Symbols:" );
 
-				ImGui::Checkbox( "Use Compression", &m_bUseCompression );
-				if ( ImGui::Button( "Save File" ) )
-					m_pFile->WriteToFile( m_strFilePath.GetString(), m_bUseCompression );
-
-				ImGui::Separator();
-
-				ImGui::Checkbox( "Show Symbols", &m_bShowSymbols );
-				if ( m_bShowSymbols )
+				for ( TUINT i = 0; i < uiNumSymbols; i++ )
 				{
-					ImGui::Text( "Symbols:" );
-
-					for ( TUINT i = 0; i < uiNumSymbols; i++ )
-					{
-						ImGui::Button( pSybmols->GetName( i ) );
-					}
+					ImGui::Button( pSybmols->GetName( i ) );
 				}
-
-				ImGui::EndTabItem();
 			}
+		}
+		ImGui::End();
 
-			// Render resource views
-			T2_FOREACH( m_vecResourceViews, it )
-			{
-				TRBResourceView* pResourceView = *it;
+		// Render resource views
+		T2_FOREACH( m_vecResourceViews, it )
+		{
+			TRBResourceView* pResourceView = *it;
 
-				pResourceView->PreRender();
-				if ( ImGui::BeginTabItem( pResourceView->GetName() ) )
-				{
-					pResourceView->OnRender( 0.0f );
-					ImGui::EndTabItem();
-				}
-				pResourceView->PostRender();
-			}
+			pResourceView->PreRender();
 
-			ImGuiComponent::PostRender();
-			ImGui::EndTabBar();
+			ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Once );
+			ImGui::Begin( pResourceView->GetNameId() );
+			pResourceView->OnRender( 0.0f );
+			ImGui::End();
+
+			pResourceView->PostRender();
 		}
 	}
 
 	ImGui::End();
+	ImGuiComponent::PostRender();
 }
 
 TBOOL TRBFileWindow::Update()
