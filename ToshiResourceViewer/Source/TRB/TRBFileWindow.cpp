@@ -73,6 +73,27 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 	return TFALSE;
 }
 
+TBOOL TRBFileWindow::SaveFile( Toshi::T2StringView strFilePath, TBOOL bCompress, Endianess eEndianess )
+{
+	PTRB trb{ eEndianess };
+
+	trb.GetSections()->CreateStream();
+
+	T2_FOREACH( m_vecResourceViews, it )
+	{
+		TRBResourceView* pResourceView = *it;
+
+		// Skip resources that cannot be saved
+		if ( !pResourceView->CanSave() )
+			continue;
+
+		pResourceView->OnSave( &trb );
+	}
+
+	trb.WriteToFile( strFilePath, bCompress );
+	return TTRUE;
+}
+
 void TRBFileWindow::Render()
 {
 	if ( !m_bVisible )
@@ -94,7 +115,10 @@ void TRBFileWindow::Render()
 
 			ImGui::Checkbox( "Use Compression", &m_bUseCompression );
 			if ( ImGui::Button( "Save File" ) )
-				m_pFile->WriteToFile( m_strFilePath.GetString(), m_bUseCompression );
+			{
+				SaveFile( "test.trb", m_bUseCompression );
+				//m_pFile->WriteToFile( m_strFilePath.GetString(), m_bUseCompression );
+			}
 
 			ImGui::Separator();
 

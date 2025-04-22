@@ -77,7 +77,7 @@ TBOOL LocaleResourceView::OnSave( PTRB* pOutTRB )
 	}
 
 	// Fill header of the file
-	pLocaleStrings->m_numstrings = foundStrings.Size();
+	pLocaleStrings->m_numstrings = pOutTRB->ConvertEndianess( foundStrings.Size() );
 	pMemStream->Alloc<T2LocalisedString>( &pLocaleStrings->Strings, foundStrings.Size() );
 
 	// Copy strings to the file
@@ -86,7 +86,18 @@ TBOOL LocaleResourceView::OnSave( PTRB* pOutTRB )
 	{
 		pMemStream->Alloc<TWCHAR>( &pLocaleStrings->Strings[ iIndex ], str->Length() + 1 );
 
-		T2String16::Copy( pLocaleStrings->Strings[ iIndex ], *str );
+		TWCHAR* pDstStr = pLocaleStrings->Strings[ iIndex ];
+		const TWCHAR* pSrcStr = *str;
+
+		// Copy strings taking endianess into account
+		while ( *pSrcStr != L'\0' )
+		{
+			*pDstStr = pOutTRB->ConvertEndianess( *pSrcStr );
+			pSrcStr++;
+			pDstStr++;
+		}
+
+		iIndex++;
 	}
 
 	// Add LocaleStrings symbol to the TRB

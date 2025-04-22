@@ -13,6 +13,7 @@ public:
 	~TRBFileWindow();
 
 	TBOOL LoadFile( Toshi::T2StringView strFilePath );
+	TBOOL SaveFile( Toshi::T2StringView strFilePath, TBOOL bCompress = TFALSE, Endianess eEndianess = Endianess_Little );
 
 	void Render();
 	TBOOL Update();
