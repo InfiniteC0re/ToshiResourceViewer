@@ -14,6 +14,8 @@ public:
 	~LocaleResourceView();
 
 	virtual TBOOL OnCreate() OVERRIDE;
+	virtual TBOOL CanSave() OVERRIDE;
+	virtual TBOOL OnSave( PTRB* pOutTRB ) OVERRIDE;
 	virtual void  OnDestroy() OVERRIDE;
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 

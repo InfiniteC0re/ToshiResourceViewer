@@ -2,6 +2,7 @@
 #include "LocaleResourceView.h"
 
 #include <T2Locale/T2Locale.h>
+#include <ToshiTools/T2DynamicVector.h>
 #include <imgui.h>
 
 #include <string>
@@ -43,6 +44,55 @@ TBOOL LocaleResourceView::OnCreate()
 	}
 
 	return TFALSE;
+}
+
+TBOOL LocaleResourceView::CanSave()
+{
+	// This file supports saving
+	return TTRUE;
+}
+
+TBOOL LocaleResourceView::OnSave( PTRB* pOutTRB )
+{
+	if ( !pOutTRB )
+		return TFALSE;
+
+	PTRBSections* pSections = pOutTRB->GetSections();
+	PTRBSymbols*  pSymbols  = pOutTRB->GetSymbols();
+	
+	// Check if the file already contains some locale strings
+	if ( pSymbols->Find<T2Locale::LocaleStrings>( pSections, "LocaleStrings" ) )
+		return TFALSE;
+
+	PTRBSections::MemoryStream* pMemStream = pSections->GetStack( 0 );
+
+	auto pLocaleStrings = pMemStream->Alloc<T2Locale::LocaleStrings>();
+
+	// Convert all strings into UTF16
+	T2DynamicVector<TString16> foundStrings( GetGlobalAllocator(), 1024, 2048 );
+
+	T2_FOREACH( m_vecStrings, str )
+	{
+		foundStrings.PushBack( Platform_UTF8ToUnicode( str->strLocalised ) );
+	}
+
+	// Fill header of the file
+	pLocaleStrings->m_numstrings = foundStrings.Size();
+	pMemStream->Alloc<T2LocalisedString>( &pLocaleStrings->Strings, foundStrings.Size() );
+
+	// Copy strings to the file
+	TINT iIndex = 0;
+	T2_FOREACH( foundStrings, str )
+	{
+		pMemStream->Alloc<TWCHAR>( &pLocaleStrings->Strings[ iIndex ], str->Length() + 1 );
+
+		T2String16::Copy( pLocaleStrings->Strings[ iIndex ], *str );
+	}
+
+	// Add LocaleStrings symbol to the TRB
+	pSymbols->Add( pMemStream, "LocaleStrings", pLocaleStrings.get() );
+
+	return TTRUE;
 }
 
 void LocaleResourceView::OnDestroy()
