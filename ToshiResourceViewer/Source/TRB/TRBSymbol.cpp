@@ -19,13 +19,13 @@ TRBSymbol::~TRBSymbol()
 {
 }
 
-void TRBSymbol::AddName( Toshi::T2ConstString8 strName )
+void TRBSymbol::AddName( Toshi::T2StringView strName )
 {
 	if ( strName )
 		m_vecNames.PushBack( strName );
 }
 
-TBOOL TRBSymbol::HasName( Toshi::T2ConstString8 strName )
+TBOOL TRBSymbol::HasName( Toshi::T2StringView strName )
 {
 	if ( !strName )
 		return TFALSE;

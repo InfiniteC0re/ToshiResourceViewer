@@ -21,7 +21,7 @@ TRBFileWindow::~TRBFileWindow()
 	UnloadFile();
 }
 
-TBOOL TRBFileWindow::LoadFile( Toshi::T2ConstString8 strFilePath )
+TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 {
 	UnloadFile();
 	m_pFile = new PTRB;

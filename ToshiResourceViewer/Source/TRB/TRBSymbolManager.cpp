@@ -35,7 +35,7 @@ void TRBSymbolManager::UnregisterSymbol( TRBSymbol* pSymbol )
 	}
 }
 
-TRBSymbol* TRBSymbolManager::GetSymbol( Toshi::T2ConstString8 strName )
+TRBSymbol* TRBSymbolManager::GetSymbol( Toshi::T2StringView strName )
 {
 	T2_FOREACH( GetRegisteredSymbols(), it )
 	{

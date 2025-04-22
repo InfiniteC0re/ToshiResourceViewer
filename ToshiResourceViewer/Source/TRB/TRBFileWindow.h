@@ -12,7 +12,7 @@ public:
 	TRBFileWindow();
 	~TRBFileWindow();
 
-	TBOOL LoadFile( Toshi::T2ConstString8 strFilePath );
+	TBOOL LoadFile( Toshi::T2StringView strFilePath );
 
 	void Render();
 	TBOOL Update();

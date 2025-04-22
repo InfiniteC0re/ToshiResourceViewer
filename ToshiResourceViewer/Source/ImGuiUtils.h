@@ -13,7 +13,7 @@ ImGuiID GetComponentID( ImGuiID uiOffset = 1 );
 
 Toshi::TString8 UnicodeToUTF8( const Toshi::TString16& wstr );
 
-TBOOL InputText( Toshi::T2ConstString8 label, Toshi::TString8& string, ImGuiInputTextFlags flags = 0 );
+TBOOL InputText( Toshi::T2StringView label, Toshi::TString8& string, ImGuiInputTextFlags flags = 0 );
 
 struct ImGuiComponent
 {

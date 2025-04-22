@@ -56,7 +56,7 @@ static TINT InputTextTString8Callback( ImGuiInputTextCallbackData* data )
 	return 0;
 }
 
-TBOOL ImGuiUtils::InputText( Toshi::T2ConstString8 label, Toshi::TString8& string, ImGuiInputTextFlags flags /*= 0 */ )
+TBOOL ImGuiUtils::InputText( Toshi::T2StringView label, Toshi::TString8& string, ImGuiInputTextFlags flags /*= 0 */ )
 {
 	return ImGui::InputText(
 	    label,

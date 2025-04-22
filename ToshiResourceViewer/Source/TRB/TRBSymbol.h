@@ -7,17 +7,17 @@ class TRBResourceView;
 class TRBSymbol
 {
 public:
-	using t_CreateResourceView = TRBResourceView*(*)(void);
+	using t_CreateResourceView = TRBResourceView* (*)( void );
 
 public:
 	TRBSymbol();
 	~TRBSymbol();
 
-	void  AddName( Toshi::T2ConstString8 strName );
-	TBOOL HasName( Toshi::T2ConstString8 strName );
+	void  AddName( Toshi::T2StringView strName );
+	TBOOL HasName( Toshi::T2StringView strName );
 
 	TRBResourceView* CreateResourceView();
-	void SetFactoryMethod( t_CreateResourceView fnCreateResourceView ) { m_fnCreateResourceView = fnCreateResourceView; }
+	void             SetFactoryMethod( t_CreateResourceView fnCreateResourceView ) { m_fnCreateResourceView = fnCreateResourceView; }
 
 	TBOOL IsRegistered() const { return m_bIsRegistered; }
 	void  MarkRegistered() { m_bIsRegistered = TTRUE; }
@@ -26,7 +26,7 @@ public:
 	TBOOL IsComplete() const { return m_vecNames.Size() && m_fnCreateResourceView; }
 
 private:
-	Toshi::T2DynamicVector<Toshi::T2ConstString8> m_vecNames;
-	t_CreateResourceView                          m_fnCreateResourceView;
-	TBOOL                                         m_bIsRegistered;
+	Toshi::T2DynamicVector<Toshi::T2StringView> m_vecNames;
+	t_CreateResourceView                        m_fnCreateResourceView;
+	TBOOL                                       m_bIsRegistered;
 };

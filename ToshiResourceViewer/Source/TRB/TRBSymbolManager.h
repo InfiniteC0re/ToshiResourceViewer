@@ -13,6 +13,6 @@ void RegisterSymbol( TRBSymbol* pSymbol );
 void UnregisterSymbol( TRBSymbol* pSymbol );
 
 // Looks for this symbol in the list of registered and returns it if found
-TRBSymbol* GetSymbol( Toshi::T2ConstString8 strName );
+TRBSymbol* GetSymbol( Toshi::T2StringView strName );
 
 } // namespace TRBSymbolManager
