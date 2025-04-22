@@ -75,7 +75,7 @@ public:
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
-		io.Fonts->AddFontFromFileTTF( "Bahnschrift.ttf", 17.0f, TNULL, io.Fonts->GetGlyphRangesCyrillic() );
+		io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Bahnschrift.ttf", 17.0f, TNULL, io.Fonts->GetGlyphRangesCyrillic() );
 
 		// Setup Dear ImGui style
 		ImGui::StyleColorsDark();

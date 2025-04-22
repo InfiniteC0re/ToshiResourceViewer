@@ -3,7 +3,7 @@
 #include "ImGuiUtils.h"
 
 #include <ToshiTools/T2DynamicVector.h>
-#include <Toshi/T2SortedVector.h>
+#include <Toshi/TDList.h>
 #include <Toshi/TString16.h>
 
 class LocaleResourceView
@@ -20,25 +20,10 @@ public:
 private:
 	struct LocaleString
 	    : public ImGuiUtils::ImGuiComponent
+	    , public Toshi::TPriList<LocaleString>::TNode
 	{
-		TINT            iIndex;
 		Toshi::TString8 strLocalised;
-
-		TBOOL operator<( LocaleString& rcOther ) const
-		{
-			return iIndex < rcOther.iIndex;
-		}
 	};
 
-	struct LocaleStringSort
-	{
-		TINT operator()( LocaleString* const& a_rcVal1, LocaleString* const& a_rcVal2 ) const
-		{
-			return a_rcVal1->iIndex - a_rcVal2->iIndex;
-		}
-	};
-
-	using VectorOfStrings = Toshi::T2SortedVector<LocaleString*, Toshi::T2DynamicVector<LocaleString*>, LocaleStringSort>;
-
-	VectorOfStrings m_vecStrings;
+	Toshi::TPriList<LocaleString> m_vecStrings;
 };

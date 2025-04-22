@@ -34,10 +34,9 @@ TBOOL LocaleResourceView::OnCreate()
 		for ( TINT i = 0; i < pLocaleStrings->m_numstrings; i++ )
 		{
 			LocaleString* pString = new LocaleString();
-			pString->iIndex       = i;
 			pString->strLocalised = ImGuiUtils::UnicodeToUTF8( pLocaleStrings->Strings[ i ] );
 
-			m_vecStrings.Push( pString );
+			m_vecStrings.Insert( pString, i );
 		}
 
 		return TTRUE;
@@ -48,36 +47,30 @@ TBOOL LocaleResourceView::OnCreate()
 
 void LocaleResourceView::OnDestroy()
 {
-	T2_FOREACH( m_vecStrings, it )
-	{
-		LocaleString* pString = *it;
+	while ( !m_vecStrings.IsEmpty() )
+		delete m_vecStrings.Begin();
 
-		delete pString;
-	}
-
-	m_vecStrings.Clear();
+	m_vecStrings.RemoveAll();
 }
 
 void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 {
-	LocaleString* pReOrder1 = TNULL;
-	LocaleString* pReOrder2 = TNULL;
+	LocaleString* pReOrder = TNULL;
 
 	// Draw header
 	ImGui::PushItemWidth( 40.0f );
 	ImGui::Text( "ID" );
 
 	// Draw the localisation strings
-	T2_FOREACH( m_vecStrings, it )
+	TINT iIndex = 0;
+	T2_FOREACH( m_vecStrings, pString )
 	{
-		LocaleString* pString = *it;
-
 		pString->PreRender();
-		TINT iOldIndex = pString->iIndex;
+		TINT iOldIndex = iIndex;
 		TINT iNewIndex = iOldIndex;
 
 		ImGui::PushItemWidth( 40.0f );
-		ImGui::LabelText( "##ID", "%d", pString->iIndex );
+		ImGui::LabelText( "##ID", "%d", iIndex );
 		ImGui::SameLine();
 
 		if ( ImGui::Button( "Down" ) ) iNewIndex++;
@@ -86,18 +79,19 @@ void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 
 		if ( iNewIndex != iOldIndex )
 		{
-			pString->iIndex = iNewIndex;
-			
-			if ( pString->iIndex < 0 )
-				pString->iIndex = 0;
-			else if ( iNewIndex < m_vecStrings.Size() )
-			{
-				m_vecStrings[ iNewIndex ]->iIndex = iOldIndex;
-				pString->iIndex                   = iNewIndex;
+			if ( iNewIndex < 0 )
+				iNewIndex = 0;
 
-				pReOrder1 = *it;
-				pReOrder2 = m_vecStrings[ iNewIndex ];
-			}
+			auto pPrev = m_vecStrings.GetPrev( pString );
+			auto pNext = m_vecStrings.GetNext( pString );
+
+			if ( iNewIndex > iOldIndex && pNext != m_vecStrings.End() )
+				iNewIndex = pNext->GetPriority();
+			else if ( iNewIndex < iOldIndex && pPrev != m_vecStrings.End() )
+				iNewIndex = pPrev->GetPriority() - 1;
+
+			pReOrder = pString;
+			pString->SetPriority( iNewIndex );
 		}
 
 		ImGui::SameLine();
@@ -105,11 +99,12 @@ void LocaleResourceView::OnRender( TFLOAT flDeltaTime )
 		ImGuiUtils::InputText( "##Localised", pString->strLocalised );
 
 		pString->PostRender();
+		iIndex++;
 	}
 
-	if ( pReOrder1 )
-		m_vecStrings.ReInsert( pReOrder1 );
-
-	if ( pReOrder2 )
-		m_vecStrings.ReInsert( pReOrder2 );
+	if ( pReOrder )
+	{
+		pReOrder->Remove();
+		m_vecStrings.Insert( pReOrder );
+	}
 }
