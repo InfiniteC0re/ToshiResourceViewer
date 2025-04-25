@@ -32,10 +32,19 @@ TBOOL LocaleResourceView::OnCreate()
 
 	if ( pLocaleStrings )
 	{
-		for ( TINT i = 0; i < pLocaleStrings->m_numstrings; i++ )
+		TINT iNumStrings = m_pTRB->ConvertEndianess( pLocaleStrings->m_numstrings );
+		for ( TINT i = 0; i < iNumStrings; i++ )
 		{
+			TINT iStringLength = T2String16::Length( pLocaleStrings->Strings[ i ] );
+			TString16 strLocalisedString( iStringLength );
+
+			for ( TINT k = 0; k < iStringLength; k++ )
+				strLocalisedString[ k ] = m_pTRB->ConvertEndianess( pLocaleStrings->Strings[ i ][ k ] );
+
+			strLocalisedString[ iStringLength ] = L'\0';
+
 			LocaleString* pString = new LocaleString();
-			pString->strLocalised = ImGuiUtils::UnicodeToUTF8( pLocaleStrings->Strings[ i ] );
+			pString->strLocalised = ImGuiUtils::UnicodeToUTF8( strLocalisedString );
 
 			m_vecStrings.Insert( pString, i );
 		}

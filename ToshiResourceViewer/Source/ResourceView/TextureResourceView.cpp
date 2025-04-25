@@ -50,7 +50,7 @@ TBOOL TextureResourceView::OnCreate()
 	m_strPreviewId.Format( "##Preview%u", GetImGuiID() );
 
 	if ( m_strSymbolName == "TTL" )
-		return LoadTTL();
+		return LoadTTLWindows();
 
 	return TFALSE;
 }
@@ -171,7 +171,7 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 	}
 }
 
-TBOOL TextureResourceView::LoadTTL()
+TBOOL TextureResourceView::LoadTTLWindows()
 {
 	TRBHeader::TTL* pTTL = TSTATICCAST( TRBHeader::TTL, m_pData );
 
