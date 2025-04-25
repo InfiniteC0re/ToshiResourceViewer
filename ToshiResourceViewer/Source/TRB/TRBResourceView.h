@@ -18,7 +18,7 @@ public:
 	virtual TBOOL CanSave();
 	virtual TBOOL OnSave( PTRB* pOutTRB );
 
-	TBOOL Create( PTRB* pTRB, void* pData );
+	TBOOL Create( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName );
 	void  Destroy();
 
 	Toshi::T2StringView GetName() const { return m_strName; }
@@ -30,4 +30,5 @@ protected:
 	PTRB*                   m_pTRB;   // optional pointer to the TRB file
 	void*                   m_pData;  // optional pointer to the data of this linked symbol
 	TRBSymbol*              m_pOwner; // pointer to the registered symbol that is capable of creating this view
+	Toshi::TString8         m_strSymbolName;
 };

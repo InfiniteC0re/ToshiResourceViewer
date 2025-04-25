@@ -19,6 +19,7 @@ project "ToshiResourceViewer"
 	{
 		"Source/**.h",
 		"Source/**.cpp",
+		"Source/**.c",
 	}
 			
 	libdirs

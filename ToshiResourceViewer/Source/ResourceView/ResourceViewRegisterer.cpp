@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "TRB/TRBSymbolManager.h"
 #include "LocaleResourceView.h"
+#include "TextureResourceView.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -28,6 +29,17 @@ static struct ResourceViewRegisterer
 			pSymbol->AddName( "LocaleStrings" );
 			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
 				return new LocaleResourceView();
+			} );
+
+			TRBSymbolManager::RegisterSymbol( pSymbol );
+		}
+
+		{
+			// Texture Library Resource
+			TRBSymbol* pSymbol = new TRBSymbol();
+			pSymbol->AddName( "TTL" );
+			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
+				return new TextureResourceView();
 			} );
 
 			TRBSymbolManager::RegisterSymbol( pSymbol );

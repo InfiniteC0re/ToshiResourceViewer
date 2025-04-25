@@ -58,7 +58,7 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 				continue;
 
 			// Initialise resource view from the data stored within TRB
-			if ( !pResourceView->Create( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get() ) )
+			if ( !pResourceView->Create( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get(), pSymbols->GetName( i ) ) )
 			{
 				pResourceView->Destroy();
 				continue;

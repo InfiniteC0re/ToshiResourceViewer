@@ -30,6 +30,10 @@ workspace "ToshiResourceViewer"
 	--	"TOSHI_PROFILER_MEMORY",
 	--	"TRACY_ENABLE"
 	}
+	
+	-- Disable precompiled headers for C files
+	filter "files:**.c"
+		flags { "NoPCH" }
 
 	-- Global Windows parameters
 	filter "system:windows"
