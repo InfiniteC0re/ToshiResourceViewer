@@ -77,11 +77,12 @@ void TextureResourceView::OnDestroy()
 
 void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 {
-	ImGui::DockSpace( m_uiDockspace.GetImGuiID(), ImVec2( 0, 0 ), ImGuiDockNodeFlags_NoTabBar );
-	
-	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0, 0 ) );
-	ImGui::Begin( m_strTexturesId.Get(), TNULL, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration );
+	ImVec2 vInitialPos = ImGui::GetCursorPos();
+
+	ImGui::Text( "Textures" );
+	ImGui::BeginChild( m_strTexturesId.Get(), ImVec2(200, -1), ImGuiChildFlags_ResizeX );
 	{
+		ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0) );
 		if ( ImGui::BeginListBox( "Textures", ImVec2(-1, -1) ) )
 		{
 			T2_FOREACH( m_vecTextures, it )
@@ -93,39 +94,80 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 
 			ImGui::EndListBox();
 		}
+		ImGui::PopStyleColor();
 
-		ImGui::End();
+		ImGui::EndChild();
 	}
 
-	ImGui::Begin( m_strPreviewId.Get(), TNULL, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration );
+	ImGui::SameLine();
+	ImVec2 vPreviewPos = ImGui::GetCursorPos();
+	ImGui::SetCursorPos( ImVec2( vPreviewPos.x, vInitialPos.y ) );
+	ImGui::Text( "Preview" );
+
+	ImGui::SameLine();
+	ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Reset View" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
+	if ( ImGui::SmallButton( "Reset View" ) )
+	{
+		m_fOffsetX = 0.0f;
+		m_fOffsetY = 0.0f;
+		m_fScale   = 1.0f;
+	}
+
+	ImGui::SetCursorPos( vPreviewPos );
+	ImGui::BeginChild( m_strPreviewId.Get(), ImVec2( -1, -1 ), 0, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 	{
 		if ( m_iSelectedTexture >= 0 && m_iSelectedTexture < m_vecTextures.Size() )
 		{
 			auto& texInfo = m_vecTextures[ m_iSelectedTexture ];
 
-			ImGui::Image( texInfo.oTexture.GetHandle(), ImVec2( (TFLOAT)texInfo.iWidth, (TFLOAT)texInfo.iHeight ) );
+			ImVec2 oRegion = ImGui::GetContentRegionAvail();
+			TFLOAT fWidth  = (TFLOAT)texInfo.iWidth * m_fScale;
+			TFLOAT fHeight = (TFLOAT)texInfo.iHeight * m_fScale;
+
+			ImGui::SetCursorPos( ImVec2( oRegion.x / 2 - fWidth / 2 + m_fOffsetX, oRegion.y / 2 - fHeight / 2 + m_fOffsetY ) );
+			ImGui::Image( texInfo.oTexture.GetHandle(), ImVec2( fWidth, fHeight ) );
+
+			// Draw info
+			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
+			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 2 - 8.0f ) );
+			ImGui::Text( "Scale: %.2f", m_fScale );
+			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() - 8.0f ) );
+			ImGui::Text( "Width: %d, Height: %d", texInfo.iWidth, texInfo.iHeight );
+			ImGui::PopStyleColor();
+
+			// Control scale and offset
+			if ( ImGui::IsWindowHovered() )
+			{
+				m_fScale += TINT( ImGui::GetIO().MouseWheel ) * 0.1f;
+				TMath::Clip( m_fScale, 0.1f, 5.0f );
+
+				static TBOOL s_bWasDragging = TFALSE;
+				TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Left );
+
+				if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+				{
+					static ImVec2 s_vLastPos  = ImGui::GetMousePos();
+					ImVec2        vCurrentPos = ImGui::GetMousePos();
+					ImVec2        vDrag       = ImVec2( s_vLastPos.x - vCurrentPos.x, s_vLastPos.y - vCurrentPos.y );
+
+					if ( s_bWasDragging )
+					{
+						m_fOffsetX -= vDrag.x;
+						m_fOffsetY -= vDrag.y;
+					}
+
+					// Don't let the event go further
+					ImGui::SetActiveID( ImGui::GetID( GetImGuiID() ), ImGui::GetCurrentWindow() );
+
+					// Save current pos for the next frame
+					s_vLastPos = vCurrentPos;
+				}
+
+				s_bWasDragging = bIsDragging;
+			}
 		}
 
-		ImGui::End();
-	}
-	ImGui::PopStyleVar();
-
-	// Dock the windows
-	if ( !m_bDocked )
-	{
-		ImGuiID dockspace_main_id = m_uiDockspace.GetImGuiID();
-		ImGui::DockBuilderRemoveNode( dockspace_main_id );
-		ImGui::DockBuilderAddNode( dockspace_main_id );
-		ImGui::DockBuilderSetNodeSize( dockspace_main_id, ImGui::GetMainViewport()->Size );
-
-		ImGuiID right;
-		ImGuiID left = ImGui::DockBuilderSplitNode( dockspace_main_id, ImGuiDir_Left, 0.4f, nullptr, &right );
-
-		ImGui::DockBuilderDockWindow( m_strTexturesId.Get(), left );
-		ImGui::DockBuilderDockWindow( m_strPreviewId.Get(), right );
-		ImGui::DockBuilderFinish( dockspace_main_id );
-
-		m_bDocked = TTRUE;
+		ImGui::EndChild();
 	}
 }
 
@@ -163,6 +205,8 @@ TBOOL TextureResourceView::LoadTTL()
 		pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, iWidth, iHeight, pImgData );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
 
 		// Free image data
 		SOIL_free_image_data( pImgData );

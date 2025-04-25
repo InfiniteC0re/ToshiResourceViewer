@@ -107,12 +107,12 @@ void TRBFileWindow::Render()
 	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
 	ImGui::PopStyleVar();
 
-	ImGui::DockSpace( uiDockSpaceID );
+	ImGui::DockSpace( uiDockSpaceID, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode );
 
 	if ( m_pFile )
 	{
 		// Render general tab containing basic info about TRB file
-		ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Once );
+		ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Always );
 		ImGui::Begin( m_strTRBInfoTabName.Get() );
 		{
 			PTRBSymbols* pSybmols     = m_pFile->GetSymbols();
@@ -148,7 +148,7 @@ void TRBFileWindow::Render()
 
 			pResourceView->PreRender();
 
-			ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Once );
+			ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Always );
 			ImGui::Begin( pResourceView->GetNameId() );
 			pResourceView->OnRender( 0.0f );
 			ImGui::End();

@@ -80,7 +80,7 @@ public:
 		// Setup Dear ImGui style
 		ImGui::StyleColorsDark();
 
-		// TRV style from ImThemes
+		// TRV style
 		ImGuiStyle& style  = ImGui::GetStyle();
 		ImVec4*     colors = style.Colors;
 

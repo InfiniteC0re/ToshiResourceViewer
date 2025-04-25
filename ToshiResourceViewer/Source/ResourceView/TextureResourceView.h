@@ -37,8 +37,9 @@ private:
 	Toshi::TString8                 m_strPackName;
 	Toshi::T2DynamicVector<Texture> m_vecTextures;
 	TINT                            m_iSelectedTexture = 0;
-	TBOOL                           m_bDocked          = TFALSE;
-	ImGuiUtils::ImGuiComponent      m_uiDockspace;
 	Toshi::T2FormatString64         m_strTexturesId;
 	Toshi::T2FormatString64         m_strPreviewId;
+	TFLOAT                          m_fOffsetX = 0.0f;
+	TFLOAT                          m_fOffsetY = 0.0f;
+	TFLOAT                          m_fScale   = 1.0f;
 };
