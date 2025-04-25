@@ -89,7 +89,7 @@ TBOOL LocaleResourceView::OnSave( PTRB* pOutTRB )
 		TWCHAR* pDstStr = pLocaleStrings->Strings[ iIndex ];
 		const TWCHAR* pSrcStr = *str;
 
-		// Copy strings taking endianess into account
+		// Copy string taking endianess into account
 		while ( *pSrcStr != L'\0' )
 		{
 			*pDstStr = pOutTRB->ConvertEndianess( *pSrcStr );

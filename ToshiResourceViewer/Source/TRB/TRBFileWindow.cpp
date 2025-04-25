@@ -101,7 +101,12 @@ void TRBFileWindow::Render()
 
 	ImGuiComponent::PreRender();
 	ImGuiID uiDockSpaceID = ImGui::GetID( m_strWindowName.GetString() );
+
+	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+	ImGui::SetNextWindowSize( ImVec2( 640, 480 ), ImGuiCond_Appearing );
 	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
+	ImGui::PopStyleVar();
+
 	ImGui::DockSpace( uiDockSpaceID );
 
 	if ( m_pFile )
@@ -113,12 +118,13 @@ void TRBFileWindow::Render()
 			PTRBSymbols* pSybmols     = m_pFile->GetSymbols();
 			TUINT        uiNumSymbols = pSybmols->GetCount();
 
-			ImGui::Checkbox( "Use Compression", &m_bUseCompression );
 			if ( ImGui::Button( "Save File" ) )
 			{
 				SaveFile( "test.trb", m_bUseCompression );
 				//m_pFile->WriteToFile( m_strFilePath.GetString(), m_bUseCompression );
 			}
+			ImGui::SameLine();
+			ImGui::Checkbox( "Use Compression", &m_bUseCompression );
 
 			ImGui::Separator();
 
