@@ -4,6 +4,9 @@
 #include "SOIL2/SOIL2.h"
 #include <imgui_internal.h>
 
+#include <CTLib/Utilities.hpp>
+#include <CTLib/Image.hpp>
+
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
@@ -50,7 +53,7 @@ TBOOL TextureResourceView::OnCreate()
 	m_strPreviewId.Format( "##Preview%u", GetImGuiID() );
 
 	if ( m_strSymbolName == "TTL" )
-		return LoadTTLWindows();
+		return LoadTTL_Windows();
 
 	return TFALSE;
 }
@@ -62,6 +65,11 @@ TBOOL TextureResourceView::CanSave()
 
 TBOOL TextureResourceView::OnSave( PTRB* pOutTRB )
 {
+	//CTLib::Buffer buffer = CTLib::IO::readFile( "C:\\Users\\InfC0re\\Desktop\\test_texture" );
+	//CTLib::Image  image  = CTLib::ImageCoder::decode( buffer, 512, 256, CTLib::ImageFormat::RGBA8 );
+	//
+	//CTLib::ImageIO::write( "C:\\Users\\InfC0re\\Desktop\\test_texture.png", image );
+
 	return TFALSE;
 }
 
@@ -171,7 +179,7 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 	}
 }
 
-TBOOL TextureResourceView::LoadTTLWindows()
+TBOOL TextureResourceView::LoadTTL_Windows()
 {
 	TRBHeader::TTL* pTTL = TSTATICCAST( TRBHeader::TTL, m_pData );
 

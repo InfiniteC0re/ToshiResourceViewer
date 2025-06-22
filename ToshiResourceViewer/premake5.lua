@@ -1,7 +1,6 @@
 project "ToshiResourceViewer"
 	kind "ConsoleApp"
 	language "C++"
-	staticruntime "on"
 	
 	pchheader "pch.h"
 	pchsource "Source/pch.cpp"
@@ -43,3 +42,4 @@ project "ToshiResourceViewer"
 		"TOSHI_CONSOLE",
 		"SDL_MAIN_HANDLED"
 	}
+	
