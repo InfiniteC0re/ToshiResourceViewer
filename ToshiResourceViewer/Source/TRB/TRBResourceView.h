@@ -21,7 +21,7 @@ public:
 	TBOOL Create( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName );
 	void  Destroy();
 
-	Toshi::T2StringView GetName() const { return m_strName; }
+	Toshi::T2StringView GetName() const { return m_strName.GetString(); }
 	Toshi::T2StringView GetNameId() const { return m_strNameId.Get(); }
 
 	template <typename T>
@@ -31,7 +31,7 @@ public:
 	}
 
 protected:
-	Toshi::T2StringView     m_strName = "Resource View";
+	Toshi::TString8         m_strName = "Resource View";
 	Toshi::T2FormatString64 m_strNameId;
 	PTRB*                   m_pTRB;   // optional pointer to the TRB file
 	void*                   m_pData;  // optional pointer to the data of this linked symbol

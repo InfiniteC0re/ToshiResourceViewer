@@ -4,6 +4,8 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 #include "ImGuiFileDialog.h"
+#include "ResourceTool/ToolManager.h"
+#include "ResourceTool/TextureTool.h"
 #include "TRB/TRBWindowManager.h"
 
 #include <Toshi/Toshi.h>
@@ -186,6 +188,14 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 			ImGui::EndMenu();
 		}
 
+		if ( ImGui::BeginMenu( "Tools" ) )
+		{
+			if ( ImGui::MenuItem( "Texture Unpacker" ) )
+				TextureTool::Toggle();
+
+			ImGui::EndMenu();
+		}
+
 		if ( ImGui::BeginMenu( "Batch" ) )
 		{
 			if ( ImGui::MenuItem( "Decompress files..." ) )
@@ -244,6 +254,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	}
 
 	TRBWindowManager::GetSingleton()->Render();
+	ToolManager::Render();
 
 	ImGui::End();
 

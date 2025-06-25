@@ -8469,7 +8469,7 @@ bool ImGui::BeginListBox(const char* label, const ImVec2& size_arg)
         AlignTextToFramePadding();
     }
 
-    BeginChild(id, frame_bb.GetSize(), ImGuiChildFlags_FrameStyle);
+    BeginChild( id, frame_bb.GetSize(), ImGuiChildFlags_FrameStyle, ImGuiWindowFlags_HorizontalScrollbar );
     return true;
 }
 
