@@ -55,6 +55,22 @@ Buffer::Buffer(size_t size) :
     }
 }
 
+void Buffer::create(size_t size)
+{
+    if (size > 0) 
+    {
+		clear();
+
+		size   = size;
+		max    = size;
+		pos    = 0;
+		off    = 0;
+		endian = BIG_ENDIAN;
+
+        buffer = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+    }
+}
+
 Buffer::Buffer(const Buffer& src) :
     buffer{nullptr},
     size{src.getSize()},

@@ -175,7 +175,9 @@ enum class ImageFormat
     C14X2 = 0xA,
 
     /*! @brief 4 bits per pixel 'lossy-ly' compressed RGB image with alpha. */
-    CMPR = 0xE
+    CMPR = 0xE,
+
+    NONE
 };
 
 /*! @brief The ImageCoder class contains methods to encode and decode image
@@ -212,7 +214,7 @@ public:
      * 
      *  @return The decoded image
      */
-    static Image decode(Buffer& data, uint32_t width, uint32_t height, ImageFormat format);
+	static Image decode( Buffer& data, Buffer& palette, uint32_t width, uint32_t height, ImageFormat format, ImageFormat paletteFormat );
 
     /*! @brief Returns the minimum number of bytes required to contain encoded
      *  image data of the specified width and height for the specified format.

@@ -50,7 +50,8 @@ TBOOL ResourceLoader::TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreate
 		case TOSHIGAME_BARNYARD:
 			if ( ePlatform == TOSHISKU_WINDOWS )
 				return ResourceLoader::TTL_Load_Barnyard_Windows( pData, eEndianess, TTRUE, rOutVector, pOutName );
-			else if ( ePlatform == TOSHISKU_REV )
+			
+			if ( ePlatform == TOSHISKU_REV )
 				return ResourceLoader::TTL_Load_Barnyard_Rev( pData, eEndianess, TTRUE, rOutVector, pOutName );
 
 			break;
@@ -144,6 +145,9 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 		dataBuffer.rewind();
 
 		CTLib::ImageFormat eCTLibImgFmt;
+		CTLib::ImageFormat eCTLibPalFmt = CTLib::ImageFormat::NONE;
+		TBYTE*             pLUT         = NULL;
+
 		switch ( eFormat )
 		{
 			case TTEX_FMT_REV_I4:
@@ -170,15 +174,56 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 			case TTEX_FMT_REV_CMPR:
 				eCTLibImgFmt = CTLib::ImageFormat::CMPR;
 				break;
+			case TTEX_FMT_REV_CI4_RGB5A3:
+				eCTLibImgFmt = CTLib::ImageFormat::C4;
+				eCTLibPalFmt = CTLib::ImageFormat::RGB5A3;
+				break;
+			case TTEX_FMT_REV_CI4_RGB565:
+				eCTLibImgFmt = CTLib::ImageFormat::C4;
+				eCTLibPalFmt = CTLib::ImageFormat::RGB565;
+				break;
+			case TTEX_FMT_REV_CI8_IA8:
+				eCTLibImgFmt = CTLib::ImageFormat::C8;
+				eCTLibPalFmt = CTLib::ImageFormat::IA8;
+				break;
+			case TTEX_FMT_REV_CI8_RGB565:
+				eCTLibImgFmt = CTLib::ImageFormat::C8;
+				eCTLibPalFmt = CTLib::ImageFormat::RGB565;
+				break;
+			case TTEX_FMT_REV_CI8_RGB5A3:
+				eCTLibImgFmt = CTLib::ImageFormat::C8;
+				eCTLibPalFmt = CTLib::ImageFormat::RGB5A3;
+				break;
 			default:
 				TERROR( "Unsupported TTEXTURE_FORMAT format for the '%s' texture!\n", pTexInfo->szFileName );
 				continue;
 		}
 
+		// Fill palette buffer if it presents
+		CTLib::Buffer paletteBuffer;
+		if ( eCTLibPalFmt != CTLib::ImageFormat::NONE )
+		{
+			if ( eCTLibImgFmt == CTLib::ImageFormat::C4 )
+			{
+				paletteBuffer.create( 16 * 2 );
+				paletteBuffer.putArray( pLUT ? pLUT : pTexInfo->pLUTColor, 16 * 2 );
+			}
+			else if ( eCTLibImgFmt == CTLib::ImageFormat::C8 )
+			{
+				paletteBuffer.create( 256 * 2 );
+				paletteBuffer.putArray( pLUT ? pLUT : pTexInfo->pLUTColor, 256 * 2 );
+			}
+			else if ( eCTLibImgFmt == CTLib::ImageFormat::C14X2 )
+			{
+				paletteBuffer.create( 16384 * 2 );
+				paletteBuffer.putArray( pLUT ? pLUT : pTexInfo->pLUTColor, 16384 * 2 );
+			}
+		}
+
 		// Decode image
 		try
 		{
-			CTLib::Image image = CTLib::ImageCoder::decode( dataBuffer, uiWidth, uiHeight, eCTLibImgFmt );
+			CTLib::Image image = CTLib::ImageCoder::decode( dataBuffer, paletteBuffer, uiWidth, uiHeight, eCTLibImgFmt, eCTLibPalFmt );
 
 			// Store data in a buffer we own
 			TBYTE* pData = (TBYTE*)TMalloc( image.getData().capacity() );
@@ -232,6 +277,14 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 	T2_FOREACH( rTextures, it )
 	{
 		TString8 strFileName = it->strName.GetString();
+		const TCHAR* pchFileName = strFileName;
+
+		TINT iPos = 0;
+		while ( iPos = strFileName.Find( "..\\", iPos ), iPos != -1 )
+		{
+			iPos += 3;
+			pchFileName = &strFileName[ iPos ];
+		}
 
 		// Fix name of the file
 		if ( strFileName.EndsWithNoCase( ".tga" ) )
@@ -245,7 +298,7 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 			strFileName += ".png";
 		}
 
-		strOutPath.Format( "%s\\%s", szOutDir, strFileName );
+		strOutPath.Format( "%s\\%s", szOutDir, pchFileName );
 		Toshi::FixPathSlashes( strOutPath );
 
 		// Create directories

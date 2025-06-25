@@ -182,6 +182,8 @@ public:
 
     ~Buffer();
 
+    void create( size_t size );
+
     /*! @brief Copies the state and data of the specified buffer.
      *
      *  The state and data of this buffer will be fully independent of the

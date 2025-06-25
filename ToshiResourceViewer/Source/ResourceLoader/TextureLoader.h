@@ -55,10 +55,10 @@ struct TTL_Rev
 		TBYTE* pData;
 		TINT   iUnk2;
 
-		void* pLUT1;
-		void* pLUT2;
-		TINT  iUnk3;
-		TINT  iUnk4;
+		TBYTE* pLUTColor;
+		TBYTE* pLUTAlpha;
+		TINT   iUnk3;
+		TINT   iUnk4;
 
 		TUINT uiNumMipMaps;
 		TUINT uiDataSize;
