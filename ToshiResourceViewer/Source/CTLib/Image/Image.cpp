@@ -8,7 +8,7 @@
 #include "pch.h"
 #include <CTLib/Image.hpp>
 
-#include <stb/stb_image.h>
+#include <SOIL2/stb_image.h>
 #include <stb/stb_image_resize.h>
 #include <stb/stb_image_write.h>
 

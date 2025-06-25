@@ -18,6 +18,7 @@ private:
 		Toshi::T2GLTexture oTexture;
 		TINT               iWidth;
 		TINT               iHeight;
+		TBYTE*             pData;
 	};
 
 public:

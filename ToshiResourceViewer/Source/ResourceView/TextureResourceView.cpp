@@ -153,6 +153,13 @@ void TextureResourceView::OnDestroy()
 	T2_FOREACH( m_vecTextures, it )
 	{
 		it->oTexture.Destroy();
+		
+		TASSERT( it->pData != TNULL );
+		if ( it->pData )
+		{
+			TFree( it->pData );
+			it->pData = TNULL;
+		}
 	}
 
 	m_vecTextures.Clear();
@@ -273,18 +280,26 @@ TBOOL TextureResourceView::LoadTTL_Barnyard_Windows()
 		TUINT  uiDataSize = ConvertEndianess( pTTL->pTextureInfos[ i ].uiDataSize );
 
 		// Load, decode image from the buffer
-		TBYTE* pImgData = SOIL_load_image_from_memory( pData, uiDataSize, &iWidth, &iHeight, &iNumComponents, 4 );
+		TBYTE* pSoilData = SOIL_load_image_from_memory( pData, uiDataSize, &iWidth, &iHeight, &iNumComponents, 4 );
 
-		if ( !pImgData )
+		if ( !pSoilData )
 		{
 			TERROR( "Couldn't load texture '%s'\n", pTTL->pTextureInfos[ i ].szFileName );
 			continue;
 		}
 
+		// Store data in a buffer we own
+		TBYTE* pImgData = (TBYTE*)TMalloc( iWidth * iHeight * iNumComponents );
+		TUtil::MemCopy( pImgData, pSoilData, iWidth * iHeight * iNumComponents );
+
+		SOIL_free_image_data( pSoilData );
+		pSoilData = TNULL;
+
 		Texture* pInsertedTexture = m_vecTextures.EmplaceBack();
 		pInsertedTexture->strName = pTTL->pTextureInfos[ i ].szFileName;
 		pInsertedTexture->iWidth  = iWidth;
 		pInsertedTexture->iHeight = iHeight;
+		pInsertedTexture->pData   = pImgData;
 
 		// Create texture
 		pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, iWidth, iHeight, pImgData );
@@ -292,9 +307,6 @@ TBOOL TextureResourceView::LoadTTL_Barnyard_Windows()
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
-
-		// Free image data
-		SOIL_free_image_data( pImgData );
 	}
 
 	return TTRUE;
@@ -365,13 +377,18 @@ TBOOL TextureResourceView::LoadTTL_Barnyard_Rev()
 		{
 			CTLib::Image image = CTLib::ImageCoder::decode( dataBuffer, uiWidth, uiHeight, eCTLibImgFmt );
 
+			// Store data in a buffer we own
+			TBYTE* pData = (TBYTE*)TMalloc( image.getData().capacity() );
+			TUtil::MemCopy( pData, *image.getData(), image.getData().capacity() );
+
 			Texture* pInsertedTexture = m_vecTextures.EmplaceBack();
 			pInsertedTexture->strName = pTexInfo->szFileName;
 			pInsertedTexture->iWidth  = TINT( uiWidth );
 			pInsertedTexture->iHeight = TINT( uiHeight );
+			pInsertedTexture->pData   = pData;
 
 			// Create texture
-			pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, pInsertedTexture->iWidth, pInsertedTexture->iHeight, *image.getData() );
+			pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, pInsertedTexture->iWidth, pInsertedTexture->iHeight, pData );
 			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
