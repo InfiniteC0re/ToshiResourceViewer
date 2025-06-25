@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "TRBFileWindow.h"
 #include "TRBSymbolManager.h"
+#include "Application.h"
 #include "imgui.h"
 
 //-----------------------------------------------------------------------------
@@ -32,8 +33,6 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 	TINT     iLastSlashIndex = m_strFilePath.FindReverse( '\\' );
 	TString8 strFileName     = ( iLastSlashIndex != -1 ) ? TString8( m_strFilePath.GetString( iLastSlashIndex + 1 ) ) : m_strFilePath;
 
-	m_strWindowName = TString8::VarArgs( "%s##%u", strFileName.GetString(), GetImGuiID() );
-	
 	// Setup tab names
 	m_strTRBInfoTabName.Format( "%s##%u", "TRB Information", GetImGuiID() );
 
@@ -41,6 +40,45 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 
 	if ( bReadFile )
 	{
+		if ( m_pFile->GetEndianess() == Endianess_Big )
+		{
+			// [6/25/2025 InfiniteC0re]
+			// HACK: since the only supported Big Endian platform is Wii, assume we are trying to load a Wii file
+			g_oTheApp.SetSelectedPlatform( TOSHISKU_REV );
+		}
+		else
+		{
+			g_oTheApp.SetSelectedPlatform( TOSHISKU_WINDOWS );
+		}
+
+		m_strWindowName = strFileName.GetString();
+
+		// Complete the window title with the game name
+		switch ( g_oTheApp.GetSelectedGame() )
+		{
+			case TOSHIGAME_BARNYARD:
+				m_strWindowName += " - Barnyard";
+				break;
+			case TOSHIGAME_DEBLOB:
+				m_strWindowName += " - de Blob";
+				break;
+		}
+
+		// Complete the window title with the platform name
+		switch ( g_oTheApp.GetSelectedPlatform() )
+		{
+			case TOSHISKU_WINDOWS:
+				m_strWindowName += " (Windows)";
+				break;
+			case TOSHISKU_REV:
+				m_strWindowName += " (GameCube / Wii)";
+				break;
+		}
+
+		// Add ID to the window title
+		m_strWindowName = TString8::VarArgs( "%s##%u", m_strWindowName.GetString(), GetImGuiID() );
+
+		// Check out each of the symbols
 		PTRBSections* pSections = m_pFile->GetSections();
 		PTRBSymbols*  pSymbols  = m_pFile->GetSymbols();
 

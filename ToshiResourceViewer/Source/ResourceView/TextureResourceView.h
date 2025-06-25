@@ -31,7 +31,8 @@ public:
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
 private:
-	TBOOL LoadTTL_Windows();
+	TBOOL LoadTTL_Barnyard_Windows();
+	TBOOL LoadTTL_Barnyard_Rev();
 
 private:
 	Toshi::TString8                 m_strPackName;

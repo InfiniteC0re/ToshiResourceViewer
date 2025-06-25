@@ -24,6 +24,12 @@ public:
 	Toshi::T2StringView GetName() const { return m_strName; }
 	Toshi::T2StringView GetNameId() const { return m_strNameId.Get(); }
 
+	template <typename T>
+	T ConvertEndianess( T a_numValue )
+	{
+		return m_pTRB->ConvertEndianess( a_numValue );
+	}
+
 protected:
 	Toshi::T2StringView     m_strName = "Resource View";
 	Toshi::T2FormatString64 m_strNameId;

@@ -32,14 +32,14 @@ TBOOL LocaleResourceView::OnCreate()
 
 	if ( pLocaleStrings )
 	{
-		TINT iNumStrings = m_pTRB->ConvertEndianess( pLocaleStrings->m_numstrings );
+		TINT iNumStrings = ConvertEndianess( pLocaleStrings->m_numstrings );
 		for ( TINT i = 0; i < iNumStrings; i++ )
 		{
 			TINT iStringLength = T2String16::Length( pLocaleStrings->Strings[ i ] );
 			TString16 strLocalisedString( iStringLength );
 
 			for ( TINT k = 0; k < iStringLength; k++ )
-				strLocalisedString[ k ] = m_pTRB->ConvertEndianess( pLocaleStrings->Strings[ i ][ k ] );
+				strLocalisedString[ k ] = ConvertEndianess( pLocaleStrings->Strings[ i ][ k ] );
 
 			strLocalisedString[ iStringLength ] = L'\0';
 
