@@ -35,6 +35,13 @@ public:
 	PTRB*                       pTRB;
 };
 
+struct ModelInstance
+{
+	Toshi::T2SharedPtr<ResourceLoader::Model> pModel;
+	Toshi::TTransformObject                   oTransform;
+};
+
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess );
+TBOOL                                     Model_CreateInstance( Toshi::T2SharedPtr<ResourceLoader::Model> pModel, ModelInstance& rOutInstance );
 
 }

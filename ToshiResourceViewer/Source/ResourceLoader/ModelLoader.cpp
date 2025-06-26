@@ -113,6 +113,14 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	return pModel;
 }
 
+TBOOL ResourceLoader::Model_CreateInstance( Toshi::T2SharedPtr<Model> pModel, ModelInstance& rOutInstance )
+{
+	rOutInstance.pModel = pModel;
+	rOutInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
+
+	return TTRUE;
+}
+
 ResourceLoader::Model::Model()
 {
 	iLODCount           = 0;

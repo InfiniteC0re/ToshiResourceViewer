@@ -22,8 +22,8 @@ public:
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
 private:
-	Toshi::TString8                           m_strTKLName;
-	Toshi::T2SharedPtr<ResourceLoader::Model> m_pModel;
+	Toshi::TString8               m_strTKLName;
+	ResourceLoader::ModelInstance m_ModelInstance;
 
 	Toshi::T2Camera        m_oCamera;
 	Toshi::T2RenderContext m_oRenderContext;

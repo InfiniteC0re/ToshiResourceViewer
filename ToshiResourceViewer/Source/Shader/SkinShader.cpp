@@ -116,7 +116,11 @@ TBOOL SkinMesh::Render()
 	T2RenderContext& rContext = g_pRenderGL->GetRenderContext();
 
 	TRenderPacket* pRenderPacket = GetMaterial()->AddRenderPacket( this );
-	pRenderPacket->SetModelViewMatrix( rContext.GetViewMatrix() );
+
+	TMatrix44 matModelView;
+	matModelView.Multiply( rContext.GetViewMatrix(), rContext.GetModelMatrix() );
+
+	pRenderPacket->SetModelViewMatrix( matModelView );
 
 	//pRenderPacket->SetSkeletonInstance( pSkeletonInstance );
 	//pRenderPacket->SetAmbientColour( pCurrentContext->GetAmbientColour().AsVector3() );
