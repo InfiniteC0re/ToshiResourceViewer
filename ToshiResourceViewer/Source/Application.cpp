@@ -6,7 +6,9 @@
 #include "ImGuiFileDialog.h"
 #include "ResourceTool/ToolManager.h"
 #include "ResourceTool/TextureTool.h"
+#include "ResourceLoader/ModelLoader.h"
 #include "TRB/TRBWindowManager.h"
+#include "Shader/SkinShader.h"
 
 #include <Toshi/Toshi.h>
 #include <ToshiTools/T2CommandLine.h>
@@ -140,6 +142,9 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	ImGui_ImplSDL2_InitForOpenGL( pWindow->GetNativeWindow(), pRender->GetGLContext() );
 	ImGui_ImplOpenGL3_Init( "#version 130" );
 
+	TOrderTable::CreateStaticData( 2000, 4000 );
+	SkinShader::CreateSingleton()->Create();
+
 	return bWindowCreated;
 }
 
@@ -150,6 +155,9 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 
 	// Update window to get new events
 	pRender->Update( flDeltaTime );
+
+	// Render to the window
+	pRender->BeginScene();
 
 	// Start the Dear ImGui frame
 	ImGui_ImplOpenGL3_NewFrame();
@@ -258,9 +266,6 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 
 	ImGui::End();
 
-	// Render to the window
-	pRender->BeginScene();
-
 	ImGui::Render();
 	ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
 
@@ -290,6 +295,8 @@ int main( int argc, char** argv )
 	engineParams.szCommandLine = GetCommandLineA();
 
 	TUtil::ToshiCreate( engineParams );
+	TUtil::SetTPStringPool( new TPString8Pool( 1024, 0, GetGlobalAllocator(), TNULL ) );
+
 	g_oTheApp.Create( "Toshi Resource Viewer", argc, argv );
 	g_oTheApp.Execute();
 

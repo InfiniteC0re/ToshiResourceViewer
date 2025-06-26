@@ -1,0 +1,134 @@
+#include "pch.h"
+#include "SkinShader.h"
+
+//-----------------------------------------------------------------------------
+// Enables memory debugging.
+// Note: Should be the last include!
+//-----------------------------------------------------------------------------
+#include <Core/TMemoryDebugOn.h>
+
+TOSHI_NAMESPACE_USING
+
+TDEFINE_CLASS( SkinShader );
+
+SkinShader::SkinShader()
+{
+	
+}
+
+SkinShader::~SkinShader()
+{
+}
+
+TBOOL SkinShader::Validate()
+{
+	if ( IsValidated() )
+		return TTRUE;
+
+	// Compile shaders
+	m_hVertexShader   = T2Render::CompileShaderFromFile( GL_VERTEX_SHADER, "Resources/Shaders/SkinShader.vs" );
+	m_hFragmentShader = T2Render::CompileShaderFromFile( GL_FRAGMENT_SHADER, "Resources/Shaders/SkinShader.fs" );
+
+	// Create shader programs
+	m_oShaderProgram = T2Render::CreateShaderProgram( m_hVertexShader, m_hFragmentShader );
+
+	return BaseClass::Validate();
+}
+
+void SkinShader::Invalidate()
+{
+	if ( !IsValidated() )
+		return;
+
+	// TODO: destroy shader and program
+
+	return BaseClass::Invalidate();
+}
+
+void SkinShader::StartFlush()
+{
+	Validate();
+
+	T2Render::GetRenderContext().EnableBlend( TTRUE );
+	T2Render::GetRenderContext().EnableDepthTest( TTRUE );
+
+	static TPString8 s_Projection = TPS8D( "u_Projection" );
+
+	T2Render::SetShaderProgram( m_oShaderProgram );
+	m_oShaderProgram.SetUniform( s_Projection, T2Render::GetRenderContext().GetProjectionMatrix() );
+}
+
+void SkinShader::EndFlush()
+{
+	Validate();
+}
+
+TBOOL SkinShader::Create()
+{
+	m_aOrderTable.Create( this, 0 );
+
+	return BaseClass::Create();
+}
+
+void SkinShader::Render( TRenderPacket* a_pRenderPacket )
+{
+	Validate();
+
+	static TPString8 s_ModelView = TPS8D( "u_ModelView" );
+
+	T2Render::SetShaderProgram( m_oShaderProgram );
+	m_oShaderProgram.SetUniform( s_ModelView, a_pRenderPacket->GetModelViewMatrix() );
+
+	if ( SkinMesh* pSkinMesh = TSTATICCAST( SkinMesh, a_pRenderPacket->GetMesh() ) )
+	{
+		T2_FOREACH( pSkinMesh->vecSubMeshes, subMesh )
+		{
+			subMesh->oVertexArray.Bind();
+			
+			glDrawElements( GL_TRIANGLE_STRIP, subMesh->uiNumIndices, GL_UNSIGNED_SHORT, NULL );
+		}
+	}
+}
+
+SkinMesh* SkinShader::CreateMesh()
+{
+	Validate();
+
+	SkinMesh* pMesh = new SkinMesh();
+	pMesh->SetOwnerShader( this );
+
+	return pMesh;
+}
+
+SkinMaterial* SkinShader::CreateMaterial()
+{
+	Validate();
+
+	SkinMaterial* pMaterial = new SkinMaterial();
+	pMaterial->SetShader( this );
+	pMaterial->SetOrderTable( &m_aOrderTable );
+
+	return pMaterial;
+}
+
+TBOOL SkinMesh::Render()
+{
+	T2RenderContext& rContext = g_pRenderGL->GetRenderContext();
+
+	TRenderPacket* pRenderPacket = GetMaterial()->AddRenderPacket( this );
+	pRenderPacket->SetModelViewMatrix( rContext.GetModelViewMatrix() );
+
+	//pRenderPacket->SetSkeletonInstance( pSkeletonInstance );
+	//pRenderPacket->SetAmbientColour( pCurrentContext->GetAmbientColour().AsVector3() );
+	//pRenderPacket->SetLightColour( pRenderInterface->GetLightColour().AsBasisVector3( 0 ) );
+	//pRenderPacket->SetLightDirection( pRenderInterface->GetLightDirection().AsBasisVector3( 0 ) );
+	//pRenderPacket->SetAlpha( pCurrentContext->GetAlphaBlend() );
+	//pRenderPacket->SetShadeCoeff( TUINT( pCurrentContext->GetShadeCoeff() * 255.0f ) );
+
+	return TTRUE;
+}
+
+void SkinMaterial::PreRender()
+{
+	g_pRenderGL->SetTexture2D( 0, m_pTexture );
+}

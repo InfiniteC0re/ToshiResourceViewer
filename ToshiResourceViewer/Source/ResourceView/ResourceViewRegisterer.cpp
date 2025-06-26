@@ -2,6 +2,7 @@
 #include "TRB/TRBSymbolManager.h"
 #include "LocaleResourceView.h"
 #include "TextureResourceView.h"
+#include "ModelResourceView.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -40,6 +41,18 @@ static struct ResourceViewRegisterer
 			pSymbol->AddName( "TTL" );
 			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
 				return new TextureResourceView();
+			} );
+
+			TRBSymbolManager::RegisterSymbol( pSymbol );
+		}
+
+		{
+			// Model Resource
+			TRBSymbol* pSymbol = new TRBSymbol();
+			pSymbol->AddName( "FileHeader" );
+			pSymbol->AddName( "Database" );
+			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
+				return new ModelResourceView();
 			} );
 
 			TRBSymbolManager::RegisterSymbol( pSymbol );
