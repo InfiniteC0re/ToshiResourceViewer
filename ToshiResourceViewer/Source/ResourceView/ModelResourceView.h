@@ -24,6 +24,11 @@ public:
 private:
 	Toshi::TString8                           m_strTKLName;
 	Toshi::T2SharedPtr<ResourceLoader::Model> m_pModel;
-	Toshi::TVector3                           m_vecCameraPosition;
-	//LODs            m_vecLODs;
+
+	Toshi::T2Camera        m_oCamera;
+	Toshi::T2RenderContext m_oRenderContext;
+	Toshi::T2FrameBuffer   m_ViewportFrameBuffer;
+	
+	Toshi::TVector3 m_vecCameraPosition;
+	TFLOAT          m_fCameraFOV;
 };

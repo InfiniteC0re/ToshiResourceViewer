@@ -14,20 +14,13 @@
 
 TOSHI_NAMESPACE_USING
 
-static T2FrameBuffer s_ViewportFrameBuffer;
-static TBOOL         s_bFrameBufferInitialised = TFALSE;
-
 ModelResourceView::ModelResourceView()
     : m_vecCameraPosition( TVector3::VEC_ZERO )
+    , m_fCameraFOV( 90.0f )
 {
-	if ( !s_bFrameBufferInitialised )
-	{
-		s_ViewportFrameBuffer.Create();
-		s_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
-		s_ViewportFrameBuffer.CreateAttachment( 0, 1920, 1080, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE );
-
-		s_bFrameBufferInitialised = TTRUE;
-	}
+	m_ViewportFrameBuffer.Create();
+	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
+	m_ViewportFrameBuffer.CreateAttachment( 0, 1920, 1080, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE );
 }
 
 ModelResourceView::~ModelResourceView()
@@ -67,41 +60,39 @@ void ModelResourceView::OnDestroy()
 void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 {
 	ImGui::DragFloat3( "Camera Position", (float*)&m_vecCameraPosition, 0.1f, -25.0f, 25.0f );
+	ImGui::DragFloat( "Camera FOV", &m_fCameraFOV, 0.1f, 10.0f, 90.0f );
 
+	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
+	m_oCamera->SetTranslate( m_vecCameraPosition );
+
+	// Update render context
 	ImVec2 availRegion = ImGui::GetContentRegionAvail();
-
-	T2Viewport oViewport( 0.0f, 0.0f, availRegion.x, availRegion.y, 0.1f, 1.0f );
-
-	// Compute perspective projection
-	T2RenderContext::Projection oProjection;
-	oProjection.SetFromFOV( availRegion.x, availRegion.y, TMath::DegToRad( 45.0f ), 1.0f, 1000.0f );
-
-	T2RenderContext::ComputePerspectiveProjection(
-	    T2Render::GetRenderContext().GetProjectionMatrix(),
-	    oViewport,
-	    oProjection
-	);
-
-	// Render Scene
-	{
-		s_ViewportFrameBuffer.Bind();
-		oViewport.Begin();
 	
-		TMatrix44 matModelView;
-		matModelView.Identity();
-		matModelView.SetTranslation( m_vecCameraPosition );
+	g_pRenderGL->SetRenderContext( m_oRenderContext );
+	m_oRenderContext.ForceRefreshFeatures();
 
-		T2Render::GetRenderContext().SetModelViewMatrix( matModelView );
+	m_oRenderContext.GetViewport().SetWidth( availRegion.x );
+	m_oRenderContext.GetViewport().SetHeight( availRegion.y );
+
+	m_oRenderContext.SetCamera( m_oCamera );
+	m_oRenderContext.UpdateCamera();
+
+	// Render scene
+	{
+		m_ViewportFrameBuffer.Bind();
+		m_oRenderContext.GetViewport().Begin();
 
 		if ( m_pModel )
 			m_pModel->Render();
 	
 		g_pRenderGL->FlushOrderTables();
 
-		oViewport.End();
-		s_ViewportFrameBuffer.Unbind();
+		m_oRenderContext.GetViewport().End();
+		m_ViewportFrameBuffer.Unbind();
 	}
 
+	g_pRenderGL->SetDefaultRenderContext();
+
 	// Render to the viewport
-	ImGui::Image( s_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( availRegion.x, availRegion.y ), ImVec2( 0.0f, 0.0f ), ImVec2( availRegion.x / 1920.0f, availRegion.y / 1080.0f ) );
+	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( availRegion.x, availRegion.y ), ImVec2( 0.0f, 0.0f ), ImVec2( availRegion.x / 1920.0f, availRegion.y / 1080.0f ) );
 }
