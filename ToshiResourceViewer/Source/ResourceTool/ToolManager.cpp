@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ToolManager.h"
 #include "TextureTool.h"
+#include "EngineTool.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -13,4 +14,5 @@ TOSHI_NAMESPACE_USING
 void ToolManager::Render()
 {
 	TextureTool::Render();
+	EngineTool::Render();
 }

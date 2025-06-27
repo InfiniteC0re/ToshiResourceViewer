@@ -21,7 +21,7 @@ public:
 
 private:
 	Toshi::TString8                                 m_strPackName;
-	Toshi::T2DynamicVector<ResourceLoader::Texture> m_vecTextures;
+	ResourceLoader::Textures                        m_vecTextures;
 	TINT                                            m_iSelectedTexture = 0;
 	Toshi::T2FormatString64                         m_strTexturesId;
 	Toshi::T2FormatString64                         m_strPreviewId;

@@ -96,21 +96,9 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Windows( void* pData, Endianess eEndiane
 		SOIL_free_image_data( pSoilData );
 		pSoilData = TNULL;
 
-		Texture* pInsertedTexture = rOutVector.EmplaceBack();
-		pInsertedTexture->strName = pTTL->pTextureInfos[ i ].szFileName;
-		pInsertedTexture->iWidth  = iWidth;
-		pInsertedTexture->iHeight = iHeight;
-		pInsertedTexture->pData   = pImgData;
-
-		if ( bCreateTextures )
-		{
-			// Create texture
-			pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, iWidth, iHeight, pImgData );
-			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
-			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
-		}
+		rOutVector.EmplaceBack(
+		    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), iWidth, iHeight, pImgData, bCreateTextures )
+		);
 	}
 
 	return TTRUE;
@@ -229,21 +217,9 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 			TBYTE* pData = (TBYTE*)TMalloc( image.getData().capacity() );
 			TUtil::MemCopy( pData, *image.getData(), image.getData().capacity() );
 
-			Texture* pInsertedTexture = rOutVector.EmplaceBack();
-			pInsertedTexture->strName = pTexInfo->szFileName;
-			pInsertedTexture->iWidth  = TINT( uiWidth );
-			pInsertedTexture->iHeight = TINT( uiHeight );
-			pInsertedTexture->pData   = pData;
-
-			if ( bCreateTextures )
-			{
-				// Create texture
-				pInsertedTexture->oTexture.Create( TEXTURE_FORMAT_R8G8B8A8_UNORM, pInsertedTexture->iWidth, pInsertedTexture->iHeight, pData );
-				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
-				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
-			}
+			rOutVector.EmplaceBack(
+			    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), TINT( uiWidth ), TINT( uiHeight ), pData, bCreateTextures )
+			);
 		}
 		catch ( CTLib::ImageError error )
 		{
@@ -256,18 +232,6 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 
 void ResourceLoader::TTL_Destroy( Textures& rTextures )
 {
-	T2_FOREACH( rTextures, it )
-	{
-		it->oTexture.Destroy();
-
-		TASSERT( it->pData != TNULL );
-		if ( it->pData )
-		{
-			TFree( it->pData );
-			it->pData = TNULL;
-		}
-	}
-
 	rTextures.FreeMemory();
 }
 
@@ -276,15 +240,7 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 	TString8 strOutPath;
 	T2_FOREACH( rTextures, it )
 	{
-		TString8 strFileName = it->strName.GetString();
-		const TCHAR* pchFileName = strFileName;
-
-		TINT iPos = 0;
-		while ( iPos = strFileName.Find( "..\\", iPos ), iPos != -1 )
-		{
-			iPos += 3;
-			pchFileName = &strFileName[ iPos ];
-		}
+		TString8 strFileName = it->Get()->GetTexture().strName.GetString();
 
 		// Fix name of the file
 		if ( strFileName.EndsWithNoCase( ".tga" ) )
@@ -298,6 +254,16 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 			strFileName += ".png";
 		}
 
+		// Skip all '..\' sequences
+		const TCHAR* pchFileName = strFileName;
+
+		TINT iPos = 0;
+		while ( iPos = strFileName.Find( "..\\", iPos ), iPos != -1 )
+		{
+			iPos += 3;
+			pchFileName = &strFileName[ iPos ];
+		}
+
 		strOutPath.Format( "%s\\%s", szOutDir, pchFileName );
 		Toshi::FixPathSlashes( strOutPath );
 
@@ -305,7 +271,7 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 		std::filesystem::path path( strOutPath.GetString() );
 		std::filesystem::create_directories( path.parent_path() );
 
-		stbi_write_png( strOutPath, it->iWidth, it->iHeight, 4, it->pData, 0 );
+		stbi_write_png( strOutPath, it->Get()->GetTexture().iWidth, it->Get()->GetTexture().iHeight, 4, it->Get()->GetTexture().pData, 0 );
 	}
 
 	return TTRUE;

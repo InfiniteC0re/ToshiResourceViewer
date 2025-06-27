@@ -1,4 +1,6 @@
 #pragma once
+#include "Resource/StreamedTexture.h"
+
 #include <Toshi/TSingleton.h>
 #include <Render/TMesh.h>
 #include <Render/TShader.h>
@@ -12,6 +14,8 @@ class SkinMesh
     : public Toshi::TMesh
 {
 public:
+	TDECLARE_CLASS( SkinMesh, Toshi::TMesh );
+
 	struct SubMesh
 	{
 		Toshi::T2IndexBuffer  oIndexBuffer;
@@ -33,6 +37,7 @@ public:
 
 public:
 	virtual TBOOL Render() OVERRIDE;
+	virtual void  OnDestroy() OVERRIDE;
 
 public:
 	Toshi::T2VertexBuffer           oVertexBuffer;
@@ -61,14 +66,14 @@ public:
 		}
 	}
 
-	void SetTexture( Toshi::T2GLTexture* pTexture )
+	void SetTexture( Toshi::T2SharedPtr<Resource::StreamedTexture> pTexture )
 	{
 		m_pTexture = pTexture;
 	}
 
 private:
-	Toshi::TOrderTable* m_pAssignedOrderTable;
-	Toshi::T2GLTexture* m_pTexture;
+	Toshi::TOrderTable*                           m_pAssignedOrderTable;
+	Toshi::T2SharedPtr<Resource::StreamedTexture> m_pTexture;
 };
 
 class SkinShader

@@ -64,7 +64,7 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 			T2_FOREACH( m_vecTextures, it )
 			{
 				TBOOL bSelected = m_iSelectedTexture == it.Index();
-				if ( ImGui::Selectable( it->strName.GetString(), &bSelected ) )
+				if ( ImGui::Selectable( it->Get()->GetTexture().strName.GetString(), &bSelected ) )
 					m_iSelectedTexture = it.Index();
 			}
 
@@ -97,18 +97,18 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 			auto& texInfo = m_vecTextures[ m_iSelectedTexture ];
 
 			ImVec2 oRegion = ImGui::GetContentRegionAvail();
-			TFLOAT fWidth  = (TFLOAT)texInfo.iWidth * m_fScale;
-			TFLOAT fHeight = (TFLOAT)texInfo.iHeight * m_fScale;
+			TFLOAT fWidth  = (TFLOAT)texInfo->GetTexture().iWidth * m_fScale;
+			TFLOAT fHeight = (TFLOAT)texInfo->GetTexture().iHeight * m_fScale;
 
 			ImGui::SetCursorPos( ImVec2( oRegion.x / 2 - fWidth / 2 + m_fOffsetX, oRegion.y / 2 - fHeight / 2 + m_fOffsetY ) );
-			ImGui::Image( texInfo.oTexture.GetHandle(), ImVec2( fWidth, fHeight ) );
+			ImGui::Image( texInfo->GetHandle(), ImVec2( fWidth, fHeight ) );
 
 			// Draw info
 			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
 			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 2 - 8.0f ) );
 			ImGui::Text( "Scale: %.2f", m_fScale );
 			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() - 8.0f ) );
-			ImGui::Text( "Width: %d, Height: %d", texInfo.iWidth, texInfo.iHeight );
+			ImGui::Text( "Width: %d, Height: %d", texInfo->GetTexture().iWidth, texInfo->GetTexture().iHeight );
 			ImGui::PopStyleColor();
 
 			// Control scale and offset

@@ -6,6 +6,8 @@
 #include "ImGuiFileDialog.h"
 #include "ResourceTool/ToolManager.h"
 #include "ResourceTool/TextureTool.h"
+#include "ResourceTool/EngineTool.h"
+#include "Resource/StreamedTexture.h"
 #include "ResourceLoader/ModelLoader.h"
 #include "TRB/TRBWindowManager.h"
 #include "Shader/SkinShader.h"
@@ -58,6 +60,9 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	T2Window* pWindow = pRender->GetWindow();
 	SDL_SetWindowResizable( pWindow->GetNativeWindow(), SDL_TRUE );
 	pWindow->SetListener( this );
+
+	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 1 );
+	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 16 );
 
 	TRBWindowManager::CreateSingleton();
 
@@ -201,6 +206,9 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 			if ( ImGui::MenuItem( "Texture Unpacker" ) )
 				TextureTool::Toggle();
 
+			if ( ImGui::MenuItem( "Engine Tool" ) )
+				EngineTool::Toggle();
+
 			ImGui::EndMenu();
 		}
 
@@ -282,6 +290,8 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
 
 	pRender->EndScene();
+
+	Resource::StreamedTexture_DestroyUnused();
 
 	return TTRUE;
 }

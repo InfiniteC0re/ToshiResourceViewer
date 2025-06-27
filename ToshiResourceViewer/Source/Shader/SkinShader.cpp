@@ -10,6 +10,7 @@
 TOSHI_NAMESPACE_USING
 
 TDEFINE_CLASS( SkinShader );
+TDEFINE_CLASS( SkinMesh );
 
 SkinShader::SkinShader()
 {
@@ -132,7 +133,15 @@ TBOOL SkinMesh::Render()
 	return TTRUE;
 }
 
+void SkinMesh::OnDestroy()
+{
+	BaseClass::OnDestroy();
+
+	delete m_pMaterial;
+	m_pMaterial = TNULL;
+}
+
 void SkinMaterial::PreRender()
 {
-	g_pRenderGL->SetTexture2D( 0, m_pTexture );
+	g_pRenderGL->SetTexture2D( 0, m_pTexture->GetHandle() );
 }

@@ -1,4 +1,6 @@
 #pragma once
+#include "Resource/StreamedTexture.h"
+
 #include <Toshi/TString8.h>
 #include <Toshi/Endianness.h>
 #include <Render/TTexture.h>
@@ -9,16 +11,7 @@
 namespace ResourceLoader
 {
 
-struct Texture
-{
-	Toshi::TString8    strName;
-	Toshi::T2GLTexture oTexture;
-	TINT               iWidth;
-	TINT               iHeight;
-	TBYTE*             pData;
-};
-
-using Textures = Toshi::T2DynamicVector<ResourceLoader::Texture>;
+using Textures = Toshi::T2DynamicVector<Toshi::T2SharedPtr<Resource::StreamedTexture>>;
 
 TBOOL TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreateTextures, TBOOL bForcePlatform, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Windows( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );

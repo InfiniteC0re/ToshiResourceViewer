@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ModelLoader.h"
 #include "Shader/SkinShader.h"
+#include "Resource/StreamedTexture.h"
 
 #include <Toshi/T2String.h>
 #include <Render/TModel.h>
@@ -17,6 +18,24 @@
 #include <Core/TMemoryDebugOn.h>
 
 TOSHI_NAMESPACE_USING
+
+static constexpr TUINT MAX_NUM_MODEL_MATERIALS = 150;
+
+static Toshi::TTMDBase::MaterialsHeader s_oCurrentModelMaterialsHeader;
+static Toshi::TTMDBase::Material        s_oCurrentModelMaterials[ MAX_NUM_MODEL_MATERIALS ];
+
+static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
+{
+	for ( TINT i = 0; i < s_oCurrentModelMaterialsHeader.iNumMaterials; i++ )
+	{
+		if ( TStringManager::String8Compare( s_oCurrentModelMaterials[ i ].szMatName, a_szName ) == 0 )
+		{
+			return &s_oCurrentModelMaterials[ i ];
+		}
+	}
+
+	return TNULL;
+}
 
 static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, TINT iIndex, ResourceLoader::ModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
 {
@@ -37,7 +56,9 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 		TUINT         uiNumSubMeshes = CONVERTENDIANESS( eEndianess, pTRBMesh->m_uiNumSubMeshes );
 		
 		// TODO: find and set real texture for this material
-		pMaterial->SetTexture( g_pTextureManager->GetInvalidTexture() );
+		pMaterial->SetTexture( Resource::StreamedTexture_FindOrCreateDummy(
+		    TPS8D( FindMaterialInModel( pTRBMesh->m_szMaterialName )->szTextureFile )
+		) );
 
 		pMesh->SetMaterial( pMaterial );
 		pMesh->vecSubMeshes.Reserve( uiNumSubMeshes );
@@ -79,6 +100,9 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 
 	auto pHeader    = pTRB->GetSymbols()->Find<TTMDWin::TRBWinHeader>( pTRB->GetSections(), "Header" );
 	auto pMaterials = pTRB->GetSymbols()->Find<TTMDBase::MaterialsHeader>( pTRB->GetSections(), "Materials" );
+
+	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pMaterials->uiSectionSize );
+	s_oCurrentModelMaterialsHeader = *pMaterials;
 
 	pModel->pTRB         = pTRB;
 	pModel->iLODCount    = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
