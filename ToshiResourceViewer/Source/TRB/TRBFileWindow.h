@@ -15,7 +15,7 @@ public:
 	TBOOL LoadFile( Toshi::T2StringView strFilePath );
 	TBOOL SaveFile( Toshi::T2StringView strFilePath, TBOOL bCompress = TFALSE, Endianess eEndianess = Endianess_Little );
 
-	void Render();
+	void Render( TFLOAT fDeltaTime );
 	TBOOL Update();
 
 private:

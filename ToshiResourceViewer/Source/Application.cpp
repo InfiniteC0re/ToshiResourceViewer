@@ -271,7 +271,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 		ImGuiFileDialog::Instance()->Close();
 	}
 
-	TRBWindowManager::GetSingleton()->Render();
+	TRBWindowManager::GetSingleton()->Render( flDeltaTime );
 	ToolManager::Render();
 
 	ImGui::End();

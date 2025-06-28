@@ -23,7 +23,7 @@ void TRBWindowManager::AddWindow( TRBFileWindow* pWindow )
 		m_vecWindows.PushBack( pWindow );
 }
 
-void TRBWindowManager::Render()
+void TRBWindowManager::Render( TFLOAT fDeltaTime )
 {
 	T2_FOREACH( m_vecWindows, it )
 	{
@@ -38,7 +38,7 @@ void TRBWindowManager::Render()
 			continue;
 		}
 
-		pWindow->Render();
+		pWindow->Render( fDeltaTime );
 	}
 }
 

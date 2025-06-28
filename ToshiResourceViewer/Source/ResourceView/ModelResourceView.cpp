@@ -11,12 +11,17 @@
 // Note: Should be the last include!
 //-----------------------------------------------------------------------------
 #include <Core/TMemoryDebugOn.h>
+#include <imgui_internal.h>
 
 TOSHI_NAMESPACE_USING
 
 ModelResourceView::ModelResourceView()
-    : m_vecCameraPosition( TVector3::VEC_ZERO )
+    : m_vecCameraCenter( TVector4::VEC_ZERO )
+	, m_fCameraDistance( 2.0f )
+    , m_fCameraDistanceTarget( 2.0f )
     , m_fCameraFOV( 90.0f )
+    , m_fCameraRotX( 0.0f )
+    , m_fCameraRotY( 0.0f )
 {
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
@@ -64,11 +69,28 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 {
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
 
-	ImGui::DragFloat3( "Camera Position", (float*)&m_vecCameraPosition, 0.1f, -25.0f, 25.0f );
+	ImGui::DragFloat( "Camera Distance", &m_fCameraDistanceTarget, 0.1f, 0.0f, 50.0f );
 	ImGui::DragFloat( "Camera FOV", &m_fCameraFOV, 0.1f, 10.0f, 90.0f );
 
+	m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
+
 	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
-	m_oCamera->SetTranslate( m_vecCameraPosition );
+
+	TMatrix44 oCameraMatrix;
+	oCameraMatrix.Identity();
+
+	TFLOAT   fCoeff      = 1.0f - TMath::Abs( TMath::Sin( m_fCameraRotY ) );
+	TVector4 vecPosition = TVector4( fCoeff * TMath::Sin( m_fCameraRotX ), TMath::Sin( m_fCameraRotY ), fCoeff * TMath::Cos( m_fCameraRotX ) );
+	vecPosition.Normalise();
+	vecPosition.Multiply( m_fCameraDistance );
+	
+	TVector4 vecDirection = TVector4::VEC_ZERO - vecPosition;
+	vecDirection.Normalise();
+
+	oCameraMatrix.SetTranslation( vecPosition + m_vecCameraCenter );
+	oCameraMatrix.LookAtDirection( vecDirection, TVector4( 0.0f, -1.0f, 0.0f ) );
+
+	m_oCamera->SetMatrix( oCameraMatrix );
 
 	// Update render context
 	ImVec2 oRegion = ImGui::GetContentRegionAvail();
@@ -104,18 +126,76 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	ImVec2 oImagePos = ImGui::GetCursorPos();
 	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( oRegion.x, oRegion.y ), ImVec2( 0.0f, oRegion.y / 1080.0f ), ImVec2( oRegion.x / 1920.0f, 0.0f ) );
 
-	// Draw info
+	// Control camera
+	if ( ImGui::IsWindowHovered() )
+	{
+		m_fCameraDistanceTarget -= ImGui::GetIO().MouseWheel * 0.25f;
+		TMath::Clip( m_fCameraDistance, 0.0f, 50.0f );
+		
+		static TBOOL s_bWasDragging = TFALSE;
+		TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Middle );
+		
+		if ( ImGui::IsMouseDown( ImGuiMouseButton_Middle ) )
+		{
+			static ImVec2 s_vLastPos  = ImGui::GetMousePos();
+			ImVec2        vCurrentPos = ImGui::GetMousePos();
+			ImVec2        vDrag       = ImVec2( s_vLastPos.x - vCurrentPos.x, s_vLastPos.y - vCurrentPos.y );
+		
+			if ( s_bWasDragging )
+			{
+				if ( ImGui::IsKeyDown( ImGuiKey_LeftShift ) )
+				{
+					TVector4 vecUpAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_UP );
+					TVector4 vecRightAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_RIGHT );
+					vecUpAxis.Multiply( vDrag.y * 0.0025f );
+					vecRightAxis.Multiply( vDrag.x * 0.0025f );
 
+					m_vecCameraCenter.x += vecUpAxis.x + vecRightAxis.x;
+					m_vecCameraCenter.y += vecUpAxis.y + vecRightAxis.y;
+					m_vecCameraCenter.z += vecUpAxis.z + vecRightAxis.z; 
+				}
+				else
+				{
+					m_fCameraRotX -= vDrag.x * 0.005f;
+					m_fCameraRotY += vDrag.y * 0.0025f;
+
+					TMath::Clip( m_fCameraRotY, -TMath::HALF_PI, TMath::HALF_PI );
+				}
+			}
+		
+			// Don't let the event go further
+			ImGui::SetActiveID( ImGui::GetID( GetImGuiID() ), ImGui::GetCurrentWindow() );
+		
+			// Save current pos for the next frame
+			s_vLastPos = vCurrentPos;
+		}
+
+		s_bWasDragging = bIsDragging;
+	}
+
+	// Draw info
 	TINT iNumMessages = 0;
 
 	auto fnPrintErrorMessage = [ & ]( const TCHAR* szMessage ) {
 		iNumMessages += 1;
 
-		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.0f, 0.0f, 1.0f ) );
+		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.78f, 0.0f, 0.75f ) );
 		ImGui::SetCursorPos( ImVec2( 20.0f, oImagePos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
 		ImGui::Text( szMessage );
 		ImGui::PopStyleColor();
 	};
+
+	auto fnPrintMessage = [ & ]( const TCHAR* szMessage ) {
+		iNumMessages += 1;
+
+		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
+		ImGui::SetCursorPos( ImVec2( 20.0f, oImagePos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
+		ImGui::Text( szMessage );
+		ImGui::PopStyleColor();
+	};
+
+	fnPrintMessage( "Hold Middle Mouse Button + Shift to move camera center." );
+	fnPrintMessage( "Hold Middle Mouse Button to rotate camera." );
 	
 	if ( m_ModelInstance.pModel->pKeyLib->IsDummy() )
 	{

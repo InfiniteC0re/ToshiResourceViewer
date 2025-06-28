@@ -132,7 +132,7 @@ TBOOL TRBFileWindow::SaveFile( Toshi::T2StringView strFilePath, TBOOL bCompress,
 	return TTRUE;
 }
 
-void TRBFileWindow::Render()
+void TRBFileWindow::Render( TFLOAT fDeltaTime )
 {
 	if ( !m_bVisible )
 		return;
@@ -188,7 +188,7 @@ void TRBFileWindow::Render()
 
 			ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Always );
 			ImGui::Begin( pResourceView->GetNameId() );
-			pResourceView->OnRender( 0.0f );
+			pResourceView->OnRender( fDeltaTime );
 			ImGui::End();
 
 			pResourceView->PostRender();

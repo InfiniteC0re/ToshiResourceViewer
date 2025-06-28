@@ -29,6 +29,10 @@ private:
 	Toshi::T2RenderContext m_oRenderContext;
 	Toshi::T2FrameBuffer   m_ViewportFrameBuffer;
 	
-	Toshi::TVector3 m_vecCameraPosition;
+	Toshi::TVector4 m_vecCameraCenter;
+	TFLOAT          m_fCameraDistance;
+	TFLOAT          m_fCameraDistanceTarget;
+	TFLOAT          m_fCameraRotX;
+	TFLOAT          m_fCameraRotY;
 	TFLOAT          m_fCameraFOV;
 };

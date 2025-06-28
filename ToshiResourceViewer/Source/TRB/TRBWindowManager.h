@@ -11,7 +11,7 @@ public:
 	~TRBWindowManager();
 
 	void AddWindow( TRBFileWindow* pWindow );
-	void Render();
+	void Render( TFLOAT fDeltaTime );
 
 private:
 	Toshi::T2DynamicVector<TRBFileWindow*> m_vecWindows;
