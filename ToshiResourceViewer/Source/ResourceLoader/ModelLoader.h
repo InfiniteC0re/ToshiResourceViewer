@@ -1,5 +1,6 @@
 #pragma once
 #include "Resource/StreamedKeyLib.h"
+#include "ResourceLoader/TextureLoader.h"
 
 #include <Render/TModel.h>
 #include <Render/TModelCollision.h>
@@ -29,6 +30,7 @@ public:
 	Toshi::TModelCollisionData*                  pCollisionMeshes;
 	PTRB*                                        pTRB;
 	Toshi::T2SharedPtr<Resource::StreamedKeyLib> pKeyLib;
+	ResourceLoader::Textures                     vecUsedTextures;
 };
 
 struct ModelInstance

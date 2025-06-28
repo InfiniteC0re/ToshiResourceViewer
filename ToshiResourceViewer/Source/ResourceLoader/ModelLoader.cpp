@@ -37,7 +37,7 @@ static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 	return TNULL;
 }
 
-static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, TINT iIndex, TModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
+static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, ResourceLoader::Model* pModel, TINT iIndex, TModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
 {
 	TINT iMeshCount = CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount1 ) + CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount2 );
 
@@ -56,9 +56,12 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 		TUINT         uiNumSubMeshes = CONVERTENDIANESS( eEndianess, pTRBMesh->m_uiNumSubMeshes );
 		
 		// TODO: find and set real texture for this material
-		pMaterial->SetTexture( Resource::StreamedTexture_FindOrCreateDummy(
+		auto pTexture = Resource::StreamedTexture_FindOrCreateDummy(
 		    TPS8D( FindMaterialInModel( pTRBMesh->m_szMaterialName )->szTextureFile )
-		) );
+		);
+
+		pMaterial->SetTexture( pTexture );
+		pModel->vecUsedTextures.PushBack( pTexture );
 
 		pMesh->SetMaterial( pMaterial );
 		pMesh->vecSubMeshes.Reserve( uiNumSubMeshes );
@@ -126,7 +129,7 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 				//LoadWorldMeshTRB( a_pModel, i, &a_pModel->m_LODs[ i ], pTRBLod );
 				break;
 			case TTMDWin::ST_SKIN:
-				ModelLoader_LoadSkinLOD_Barnyard_Windows( pTRB, eEndianess, i, pModel->aLODs[ i ], *pTRBLod );
+				ModelLoader_LoadSkinLOD_Barnyard_Windows( pTRB, eEndianess, pModel, i, pModel->aLODs[ i ], *pTRBLod );
 				break;
 			case TTMDWin::ST_GRASS:
 				//LoadGrassMeshTRB( a_pModel, i, &a_pModel->m_LODs[ i ], pTRBLod );

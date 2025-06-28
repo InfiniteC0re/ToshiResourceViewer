@@ -71,13 +71,13 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	m_oCamera->SetTranslate( m_vecCameraPosition );
 
 	// Update render context
-	ImVec2 availRegion = ImGui::GetContentRegionAvail();
+	ImVec2 oRegion = ImGui::GetContentRegionAvail();
 	
 	g_pRenderGL->SetRenderContext( m_oRenderContext );
 	m_oRenderContext.ForceRefreshFeatures();
 
-	m_oRenderContext.GetViewport().SetWidth( availRegion.x );
-	m_oRenderContext.GetViewport().SetHeight( availRegion.y );
+	m_oRenderContext.GetViewport().SetWidth( oRegion.x );
+	m_oRenderContext.GetViewport().SetHeight( oRegion.y );
 
 	m_oRenderContext.SetCamera( m_oCamera );
 	m_oRenderContext.UpdateCamera();
@@ -101,5 +101,34 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	g_pRenderGL->SetDefaultRenderContext();
 
 	// Render to the viewport
-	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( availRegion.x, availRegion.y ), ImVec2( 0.0f, availRegion.y / 1080.0f ), ImVec2( availRegion.x / 1920.0f, 0.0f ) );
+	ImVec2 oImagePos = ImGui::GetCursorPos();
+	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( oRegion.x, oRegion.y ), ImVec2( 0.0f, oRegion.y / 1080.0f ), ImVec2( oRegion.x / 1920.0f, 0.0f ) );
+
+	// Draw info
+
+	TINT iNumMessages = 0;
+
+	auto fnPrintErrorMessage = [ & ]( const TCHAR* szMessage ) {
+		iNumMessages += 1;
+
+		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.0f, 0.0f, 1.0f ) );
+		ImGui::SetCursorPos( ImVec2( 20.0f, oImagePos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
+		ImGui::Text( szMessage );
+		ImGui::PopStyleColor();
+	};
+	
+	if ( m_ModelInstance.pModel->pKeyLib->IsDummy() )
+	{
+		T2String8::Format( T2String8::ms_aScratchMem, "Missing keyframe library '%s'", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
+		fnPrintErrorMessage( T2String8::ms_aScratchMem );
+	}
+
+	T2_FOREACH( m_ModelInstance.pModel->vecUsedTextures, it )
+	{
+		if ( it->Get()->IsDummy() )
+		{
+			T2String8::Format( T2String8::ms_aScratchMem, "Missing texture '%s'", it->Get()->GetTexture().strName.GetString() );
+			fnPrintErrorMessage( T2String8::ms_aScratchMem );
+		}
+	}
 }
