@@ -294,6 +294,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	pRender->EndScene();
 
 	Resource::StreamedTexture_DestroyUnused();
+	Resource::StreamedKeyLib_DestroyUnused();
 
 	return TTRUE;
 }

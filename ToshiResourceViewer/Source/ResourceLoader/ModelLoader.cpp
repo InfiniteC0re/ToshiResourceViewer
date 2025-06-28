@@ -104,16 +104,57 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	auto pHeader         = pTRB->GetSymbols()->Find<TTMDWin::TRBWinHeader>( pTRB->GetSections(), "Header" );
 	auto pMaterials      = pTRB->GetSymbols()->Find<TTMDBase::MaterialsHeader>( pTRB->GetSections(), "Materials" );
 	auto pSkeletonHeader = pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( pTRB->GetSections(), "SkeletonHeader" );
+	auto pSkeleton       = pTRB->GetSymbols()->Find<TSkeleton>( pTRB->GetSections(), "Skeleton" );
 
 	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pMaterials->uiSectionSize );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
 
-	pModel->pTRB         = pTRB;
-	pModel->iLODCount    = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
-	pModel->fLODDistance = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
+	pModel->pTRB             = pTRB;
+	pModel->iLODCount        = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
+	pModel->fLODDistance     = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
+	pModel->bAnimationsReady = TFALSE;
+
+	if ( pSkeleton )
+	{
+		pModel->pSkeleton = new TSkeleton();
+		
+		TUtil::MemCopy( pModel->pSkeleton, pSkeleton.get(), sizeof( TSkeleton ) );
+
+		pModel->pSkeleton->m_pBones = new TSkeletonBone[ pSkeleton->m_iBoneCount ];
+		TUtil::MemCopy( pModel->pSkeleton->m_pBones, pSkeleton->m_pBones, sizeof( TSkeletonBone ) * pSkeleton->m_iBoneCount );
+
+		pModel->pSkeleton->m_SkeletonSequences = new TSkeletonSequence[ pSkeleton->m_iSequenceCount ];
+
+		const TINT iAutoBoneCount = pModel->pSkeleton->GetAutoBoneCount();
+
+		for ( TINT i = 0; i < pSkeleton->m_iSequenceCount; i++ )
+		{
+			TUtil::MemCopy( &pModel->pSkeleton->m_SkeletonSequences[ i ], &pSkeleton->m_SkeletonSequences[ i ], sizeof( TSkeletonSequence ) );
+
+			pModel->pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones = new TSkeletonSequenceBone[ iAutoBoneCount ];
+			TUtil::MemCopy( pModel->pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones, pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones, sizeof( TSkeletonSequenceBone ) * iAutoBoneCount );
+
+			for ( TINT k = 0; k < iAutoBoneCount; k++ )
+			{
+				TSIZE uiDataSize = pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_iNumKeys * pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_iKeySize;
+
+				pModel->pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_pData = new TBYTE[ uiDataSize ];
+				TUtil::MemCopy(
+				    pModel->pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_pData,
+				    pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_pData,
+				    uiDataSize
+				);
+			}
+		}
+	}
 
 	if ( pSkeletonHeader )
+	{
+		pModel->oSkeletonHeader = *pSkeletonHeader;
 		pModel->pKeyLib = Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( pSkeletonHeader->m_szTKLName ) );
+
+		Model_PrepareAnimations( pModel );
+	}
 
 	for ( TINT i = 0; i < CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs ); i++ )
 	{
@@ -144,10 +185,31 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	return pModel;
 }
 
+TBOOL ResourceLoader::Model_PrepareAnimations( Model* pModel )
+{
+	if ( !pModel->bAnimationsReady && pModel->pKeyLib && pModel->pKeyLib->IsLoaded() )
+	{
+		pModel->pSkeleton->m_KeyLibraryInstance.CreateEx(
+		    pModel->pKeyLib->GetLibrary(),
+		    pModel->oSkeletonHeader.m_iTKeyCount,
+		    pModel->oSkeletonHeader.m_iQKeyCount,
+		    pModel->oSkeletonHeader.m_iSKeyCount,
+		    pModel->oSkeletonHeader.m_iTBaseIndex,
+		    pModel->oSkeletonHeader.m_iQBaseIndex,
+		    pModel->oSkeletonHeader.m_iSBaseIndex
+		);
+
+		pModel->bAnimationsReady = TTRUE;
+	}
+
+	return pModel->bAnimationsReady;
+}
+
 TBOOL ResourceLoader::Model_CreateInstance( Toshi::T2SharedPtr<Model> pModel, ModelInstance& rOutInstance )
 {
 	rOutInstance.pModel = pModel;
 	rOutInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
+	rOutInstance.pSkeletonInstance = ( pModel->pSkeleton ) ? pModel->pSkeleton->CreateInstance( TTRUE ) : TNULL;
 
 	return TTRUE;
 }

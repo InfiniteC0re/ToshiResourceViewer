@@ -26,6 +26,8 @@ ModelResourceView::ModelResourceView()
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
 	m_ViewportFrameBuffer.CreateAttachment( 0, 1920, 1080, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE );
+
+	m_oCamera.SetNearPlane( 0.1f );
 }
 
 ModelResourceView::~ModelResourceView()
@@ -67,15 +69,16 @@ void ModelResourceView::OnDestroy()
 
 void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 {
+	// Prepare camera
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
 
 	ImGui::DragFloat( "Camera Distance", &m_fCameraDistanceTarget, 0.1f, 0.0f, 50.0f );
 	ImGui::DragFloat( "Camera FOV", &m_fCameraFOV, 0.1f, 10.0f, 90.0f );
 
 	m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
-
 	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
 
+	// Arcball camera behaviour
 	TMatrix44 oCameraMatrix;
 	oCameraMatrix.Identity();
 
@@ -112,7 +115,20 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		m_ModelInstance.oTransform.GetLocalMatrixImp( m_oRenderContext.GetModelMatrix() );
 
 		if ( m_ModelInstance.pModel )
+		{
+			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel ) )
+			{
+				if ( !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+					m_ModelInstance.pSkeletonInstance->AddAnimationFull( 0, 1.0f, 0.5f, 0.5f, TAnimation::Flags_Managed );
+
+				m_ModelInstance.pSkeletonInstance->UpdateTime( flDeltaTime );
+				m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
+
+				m_oRenderContext.SetSkeletonInstance( m_ModelInstance.pSkeletonInstance );
+			}
+
 			m_ModelInstance.pModel->Render();
+		}
 	
 		g_pRenderGL->FlushOrderTables();
 
@@ -130,7 +146,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	if ( ImGui::IsWindowHovered() )
 	{
 		m_fCameraDistanceTarget -= ImGui::GetIO().MouseWheel * 0.25f;
-		TMath::Clip( m_fCameraDistance, 0.0f, 50.0f );
+		TMath::Clip( m_fCameraDistanceTarget, 0.0f, 50.0f );
 		
 		static TBOOL s_bWasDragging = TFALSE;
 		TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Middle );

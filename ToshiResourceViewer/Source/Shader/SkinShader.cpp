@@ -80,10 +80,33 @@ void SkinShader::Render( TRenderPacket* a_pRenderPacket )
 	T2Render::SetShaderProgram( m_oShaderProgram );
 	m_oShaderProgram.SetUniform( s_ModelView, a_pRenderPacket->GetModelViewMatrix() );
 
+	TSkeletonInstance* pSkeletonInstance = a_pRenderPacket->GetSkeletonInstance();
+
 	if ( SkinMesh* pSkinMesh = TSTATICCAST( SkinMesh, a_pRenderPacket->GetMesh() ) )
 	{
+		static TPString8 s_NumBones       = TPS8D( "u_NumBones" );
+		static TPString8 s_BoneTransforms = TPS8D( "u_BoneTransforms" );
+
+		TMatrix44 s_aBoneTransforms[ 28 ];
+
 		T2_FOREACH( pSkinMesh->vecSubMeshes, subMesh )
 		{
+			if ( pSkeletonInstance )
+			{
+				// Fill matrices from the skeleton instance
+				for ( TINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
+					s_aBoneTransforms[ k ] = pSkeletonInstance->GetBone( subMesh->aBones[ k ] ).m_Transform;
+			}
+			else
+			{
+				// No skeleton instance, reset matrices
+				for ( TINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
+					s_aBoneTransforms[ k ].Identity();
+			}
+
+			m_oShaderProgram.SetUniform( s_BoneTransforms, s_aBoneTransforms, subMesh->uiNumBones );
+			m_oShaderProgram.SetUniform( s_NumBones, subMesh->uiNumBones );
+
 			subMesh->oVertexArray.Bind();
 			
 			glDrawElements( GL_TRIANGLE_STRIP, subMesh->uiNumIndices, GL_UNSIGNED_SHORT, NULL );
@@ -122,8 +145,8 @@ TBOOL SkinMesh::Render()
 	matModelView.Multiply( rContext.GetViewMatrix(), rContext.GetModelMatrix() );
 
 	pRenderPacket->SetModelViewMatrix( matModelView );
+	pRenderPacket->SetSkeletonInstance( rContext.GetSkeletonInstance() );
 
-	//pRenderPacket->SetSkeletonInstance( pSkeletonInstance );
 	//pRenderPacket->SetAmbientColour( pCurrentContext->GetAmbientColour().AsVector3() );
 	//pRenderPacket->SetLightColour( pRenderInterface->GetLightColour().AsBasisVector3( 0 ) );
 	//pRenderPacket->SetLightDirection( pRenderInterface->GetLightDirection().AsBasisVector3( 0 ) );

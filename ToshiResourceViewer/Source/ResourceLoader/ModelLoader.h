@@ -21,25 +21,40 @@ public:
 	void Render();
 
 public:
+	PTRB* pTRB;
+	
+	Toshi::TTMDBase::SkeletonHeader              oSkeletonHeader;
 	Toshi::TSkeleton*                            pSkeleton;
-	TINT                                         iLODCount;
-	Toshi::TModelLOD                             aLODs[ 5 ];
-	TFLOAT                                       fLODDistance;
-	TFLOAT                                       aLODDistances[ 4 ];
-	TINT                                         iNumCollisionMeshes;
-	Toshi::TModelCollisionData*                  pCollisionMeshes;
-	PTRB*                                        pTRB;
 	Toshi::T2SharedPtr<Resource::StreamedKeyLib> pKeyLib;
-	ResourceLoader::Textures                     vecUsedTextures;
+	TBOOL                                        bAnimationsReady;
+
+	TINT             iLODCount;
+	Toshi::TModelLOD aLODs[ 5 ];
+	TFLOAT           fLODDistance;
+	TFLOAT           aLODDistances[ 4 ];
+
+	TINT                        iNumCollisionMeshes;
+	Toshi::TModelCollisionData* pCollisionMeshes;
+
+	ResourceLoader::Textures vecUsedTextures;
 };
 
 struct ModelInstance
 {
+	ModelInstance() = default;
+	~ModelInstance()
+	{
+		if ( pSkeletonInstance )
+			delete pSkeletonInstance;
+	}
+
 	Toshi::T2SharedPtr<ResourceLoader::Model> pModel;
 	Toshi::TTransformObject                   oTransform;
+	Toshi::TSkeletonInstance*                 pSkeletonInstance;
 };
 
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess );
+TBOOL                                     Model_PrepareAnimations( ResourceLoader::Model* pModel );
 TBOOL                                     Model_CreateInstance( Toshi::T2SharedPtr<ResourceLoader::Model> pModel, ModelInstance& rOutInstance );
 
 }
