@@ -2,6 +2,7 @@
 #include "TRB/TRBSymbolManager.h"
 #include "LocaleResourceView.h"
 #include "TextureResourceView.h"
+#include "KeyLibResourceView.h"
 #include "ModelResourceView.h"
 
 //-----------------------------------------------------------------------------
@@ -53,6 +54,17 @@ static struct ResourceViewRegisterer
 			pSymbol->AddName( "Database" );
 			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
 				return new ModelResourceView();
+			} );
+
+			TRBSymbolManager::RegisterSymbol( pSymbol );
+		}
+
+		{
+			// KeyFrame Library Resource
+			TRBSymbol* pSymbol = new TRBSymbol();
+			pSymbol->AddName( "keylib" );
+			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
+				return new KeyLibResourceView();
 			} );
 
 			TRBSymbolManager::RegisterSymbol( pSymbol );

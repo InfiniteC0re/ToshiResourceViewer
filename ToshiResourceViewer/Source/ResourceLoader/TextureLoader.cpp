@@ -230,11 +230,6 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 	return TTRUE;
 }
 
-void ResourceLoader::TTL_Destroy( Textures& rTextures )
-{
-	rTextures.FreeMemory();
-}
-
 TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir )
 {
 	TString8 strOutPath;

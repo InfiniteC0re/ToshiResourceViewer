@@ -118,7 +118,6 @@ void TextureTool::Render()
 					if ( ResourceLoader::TTL_Load( pSymbols->GetByIndex<TBYTE>( trb.GetSections(), i ).get(), trb.GetEndianess(), TFALSE, TFALSE, vecTextures, TNULL ) )
 					{
 						ResourceLoader::TTL_UnpackTextures( vecTextures, s_DirOutBuffer );
-						ResourceLoader::TTL_Destroy( vecTextures );
 					}
 				}
 			}

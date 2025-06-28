@@ -1,4 +1,6 @@
 #pragma once
+#include "Resource/StreamedKeyLib.h"
+
 #include <Render/TModel.h>
 #include <Render/TModelCollision.h>
 #include <Render/TSkeleton.h>
@@ -9,13 +11,6 @@
 namespace ResourceLoader
 {
 
-struct ModelLOD
-{
-	Toshi::TSphere BoundingSphere = Toshi::TSphere( 0.0f, 0.0f, 0.0f, 0.0f );
-	TINT           iNumMeshes     = 0;
-	Toshi::TMesh** ppMeshes       = TNULL;
-};
-
 class Model
 {
 public:
@@ -25,14 +20,15 @@ public:
 	void Render();
 
 public:
-	Toshi::TSkeleton*           pSkeleton;
-	TINT                        iLODCount;
-	ModelLOD                    aLODs[ 5 ];
-	TFLOAT                      fLODDistance;
-	TFLOAT                      aLODDistances[ 4 ];
-	TINT                        iNumCollisionMeshes;
-	Toshi::TModelCollisionData* pCollisionMeshes;
-	PTRB*                       pTRB;
+	Toshi::TSkeleton*                            pSkeleton;
+	TINT                                         iLODCount;
+	Toshi::TModelLOD                             aLODs[ 5 ];
+	TFLOAT                                       fLODDistance;
+	TFLOAT                                       aLODDistances[ 4 ];
+	TINT                                         iNumCollisionMeshes;
+	Toshi::TModelCollisionData*                  pCollisionMeshes;
+	PTRB*                                        pTRB;
+	Toshi::T2SharedPtr<Resource::StreamedKeyLib> pKeyLib;
 };
 
 struct ModelInstance

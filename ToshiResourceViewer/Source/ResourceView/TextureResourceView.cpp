@@ -48,7 +48,6 @@ TBOOL TextureResourceView::OnSave( PTRB* pOutTRB )
 
 void TextureResourceView::OnDestroy()
 {
-	ResourceLoader::TTL_Destroy( m_vecTextures );
 }
 
 void TextureResourceView::OnRender( TFLOAT flDeltaTime )

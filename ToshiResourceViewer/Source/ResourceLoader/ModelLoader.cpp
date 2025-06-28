@@ -37,7 +37,7 @@ static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 	return TNULL;
 }
 
-static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, TINT iIndex, ResourceLoader::ModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
+static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, TINT iIndex, TModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
 {
 	TINT iMeshCount = CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount1 ) + CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount2 );
 
@@ -98,8 +98,9 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 {
 	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
 
-	auto pHeader    = pTRB->GetSymbols()->Find<TTMDWin::TRBWinHeader>( pTRB->GetSections(), "Header" );
-	auto pMaterials = pTRB->GetSymbols()->Find<TTMDBase::MaterialsHeader>( pTRB->GetSections(), "Materials" );
+	auto pHeader         = pTRB->GetSymbols()->Find<TTMDWin::TRBWinHeader>( pTRB->GetSections(), "Header" );
+	auto pMaterials      = pTRB->GetSymbols()->Find<TTMDBase::MaterialsHeader>( pTRB->GetSections(), "Materials" );
+	auto pSkeletonHeader = pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( pTRB->GetSections(), "SkeletonHeader" );
 
 	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pMaterials->uiSectionSize );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
@@ -107,6 +108,9 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	pModel->pTRB         = pTRB;
 	pModel->iLODCount    = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
 	pModel->fLODDistance = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
+
+	if ( pSkeletonHeader )
+		pModel->pKeyLib = Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( pSkeletonHeader->m_szTKLName ) );
 
 	for ( TINT i = 0; i < CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs ); i++ )
 	{

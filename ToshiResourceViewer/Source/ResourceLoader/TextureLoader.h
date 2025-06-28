@@ -16,7 +16,6 @@ using Textures = Toshi::T2DynamicVector<Toshi::T2SharedPtr<Resource::StreamedTex
 TBOOL TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreateTextures, TBOOL bForcePlatform, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Windows( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
-void  TTL_Destroy( Textures& rTextures );
 
 TBOOL TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir );
 

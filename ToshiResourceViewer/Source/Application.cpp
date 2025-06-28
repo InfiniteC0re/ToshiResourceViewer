@@ -186,6 +186,8 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	ImGuiID dockspaceId = ImGui::GetID( "MainDockspace" );
 	ImGui::DockSpace( dockspaceId );
 
+	constexpr const TCHAR* FILE_FILTER = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
+
 	if ( ImGui::BeginMainMenuBar() )
 	{
 		if ( ImGui::BeginMenu( "File" ) )
@@ -195,7 +197,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 				IGFD::FileDialogConfig config;
 				config.path = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", ".trb,.ttl,.trz", config );
+				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", FILE_FILTER, config );
 			}
 
 			ImGui::EndMenu();
@@ -220,7 +222,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 				config.countSelectionMax = 0;
 				config.path              = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", ".trb,.ttl,.trz", config );
+				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", FILE_FILTER, config );
 			}
 
 			ImGui::EndMenu();
@@ -311,6 +313,8 @@ int main( int argc, char** argv )
 	g_oTheApp.Execute();
 
 	//TUtil::ToshiDestroy();
+
+	TOrderTable::DestroyStaticData();
 
 	return 0;
 }
