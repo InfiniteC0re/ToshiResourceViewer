@@ -24,7 +24,8 @@ project "ToshiResourceViewer"
 	libdirs
 	{
 		"%{LibDir.sdl2}",
-		"%{LibDir.glew}"
+		"%{LibDir.glew}",
+		"%{LibDir.assimp}",
 	}
 
 	includedirs
@@ -34,7 +35,8 @@ project "ToshiResourceViewer"
 		"%{IncludeDir.sdl2}",
 		"%{IncludeDir.glm}",
 		"%{IncludeDir.glew}",
-		"%{IncludeDir.imgui}"
+		"%{IncludeDir.imgui}",
+		"%{IncludeDir.assimp}",
 	}
 
 	defines
@@ -43,3 +45,12 @@ project "ToshiResourceViewer"
 		"SDL_MAIN_HANDLED"
 	}
 	
+	filter "configurations:Debug"
+		links { "assimp-vc143-mtd.lib" }
+
+	filter "configurations:Release"
+		links { "assimp-vc143-mt.lib" }
+
+	filter "configurations:Final"
+		links { "assimp-vc143-mt.lib" }
+

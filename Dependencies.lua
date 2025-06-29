@@ -14,6 +14,7 @@ IncludeDir.glew = "%{wks.location}/OpenToshi/Toshi/Vendor/glew/include"
 IncludeDir.sdl2 = "%{wks.location}/OpenToshi/Toshi/Vendor/sdl2/include"
 IncludeDir.toshi = "%{wks.location}/OpenToshi/Toshi/Source"
 IncludeDir.imgui = "%{wks.location}/ThirdParty/ImGui"
+IncludeDir.assimp = "%{wks.location}/ToshiResourceViewer/Vendor/assimp/include"
 
 LibDir = {}
 LibDir.fmod = "%{wks.location}/OpenToshi/Toshi/Vendor/fmod/lib"
@@ -22,6 +23,7 @@ LibDir.bink = "%{wks.location}/OpenToshi/Toshi/Vendor/bink/lib"
 LibDir.detours = "%{wks.location}/OpenToshi/SDK/Vendor/Detours/lib"
 LibDir.glew = "%{wks.location}/OpenToshi/Toshi/Vendor/glew/lib"
 LibDir.sdl2 = "%{wks.location}/OpenToshi/Toshi/Vendor/sdl2/lib"
+LibDir.assimp = "%{wks.location}/ToshiResourceViewer/Vendor/assimp/lib"
 
 -- content of these folders should be copied to any client application
 ClientContentCommon = "%{wks.location}/OpenToshiContent/Common/"

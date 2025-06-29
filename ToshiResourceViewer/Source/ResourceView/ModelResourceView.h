@@ -22,6 +22,9 @@ public:
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
 private:
+	void ExportScene();
+
+private:
 	Toshi::TString8               m_strTKLName;
 	Toshi::T2FormatString64       m_strAnimationsId;
 	ResourceLoader::ModelInstance m_ModelInstance;

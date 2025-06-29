@@ -1,17 +1,18 @@
 #include "pch.h"
 #include "ModelResourceView.h"
-
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
 
 #include <Platform/GL/T2FrameBuffer_GL.h>
+#include <assimp/Exporter.hpp>
+#include <assimp/scene.h>
+#include <imgui_internal.h>
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
 //-----------------------------------------------------------------------------
 #include <Core/TMemoryDebugOn.h>
-#include <imgui_internal.h>
 
 TOSHI_NAMESPACE_USING
 
@@ -116,6 +117,11 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	ImVec2 vPreviewPos = ImGui::GetCursorPos();
 	ImGui::SetCursorPos( ImVec2( vPreviewPos.x, vInitialPos.y ) );
 	ImGui::Text( "Preview" );
+	ImGui::SameLine();
+
+	ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Export" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
+	if ( ImGui::SmallButton( "Export" ) )
+		ExportScene();
 
 	// Prepare camera
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
@@ -274,4 +280,17 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 			fnPrintErrorMessage( T2String8::ms_aScratchMem );
 		}
 	}
+}
+
+void ModelResourceView::ExportScene()
+{
+	/*aiScene scene;
+
+	scene.mRootNode = new aiNode();
+
+	scene.mMaterials      = new aiMaterial*[ 1 ];
+	scene.mMaterials[ 0 ] = TNULL;
+	scene.mNumMaterials   = 1;
+
+	scene.mMaterials[ 0 ] = new aiMaterial();*/
 }

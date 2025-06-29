@@ -94,13 +94,13 @@ void SkinShader::Render( TRenderPacket* a_pRenderPacket )
 			if ( pSkeletonInstance )
 			{
 				// Fill matrices from the skeleton instance
-				for ( TINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
+				for ( TUINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
 					s_aBoneTransforms[ k ] = pSkeletonInstance->GetBone( subMesh->aBones[ k ] ).m_Transform;
 			}
 			else
 			{
 				// No skeleton instance, reset matrices
-				for ( TINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
+				for ( TUINT k = 0; k < subMesh->uiNumBones && k < TARRAYSIZE( s_aBoneTransforms ); k++ )
 					s_aBoneTransforms[ k ].Identity();
 			}
 
