@@ -237,6 +237,23 @@ ResourceLoader::Model::~Model()
 			delete[] aLODs[ i ].ppMeshes;
 		}
 	}
+
+	if ( pSkeleton )
+	{
+		for ( TINT i = 0; i < pSkeleton->m_iSequenceCount; i++ )
+		{
+			for ( TINT k = 0; k < pSkeleton->GetAutoBoneCount(); k++ )
+				delete[] pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones[ k ].m_pData;
+
+			delete[] pSkeleton->m_SkeletonSequences[ i ].m_pSeqBones;
+		}
+
+		delete[] pSkeleton->m_SkeletonSequences;
+		delete[] pSkeleton->m_pBones;
+
+		pSkeleton->m_KeyLibraryInstance.Destroy();
+		delete pSkeleton;
+	}
 }
 
 void ResourceLoader::Model::Render()
@@ -245,5 +262,14 @@ void ResourceLoader::Model::Render()
 	{
 		if ( TMesh* pMesh = aLODs[ 0 ].ppMeshes[ i ] )
 			pMesh->Render();
+	}
+}
+
+ResourceLoader::ModelInstance::~ModelInstance()
+{
+	if ( pSkeletonInstance )
+	{
+		pSkeletonInstance->RemoveAllAnimations();
+		delete pSkeletonInstance;
 	}
 }

@@ -22,6 +22,7 @@ ModelResourceView::ModelResourceView()
     , m_fCameraFOV( 90.0f )
     , m_fCameraRotX( 0.0f )
     , m_fCameraRotY( 0.0f )
+    , m_iSelectedSequence( -1 )
 {
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
@@ -36,6 +37,9 @@ ModelResourceView::~ModelResourceView()
 
 TBOOL ModelResourceView::OnCreate()
 {
+	// Create unique IDs
+	m_strAnimationsId.Format( "##Animations%u", GetImGuiID() );
+
 	if ( m_strSymbolName == "FileHeader" )
 	{
 		TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
@@ -69,11 +73,52 @@ void ModelResourceView::OnDestroy()
 
 void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 {
+	ImVec2 vInitialPos = ImGui::GetCursorPos();
+
+	ImGui::Text( "Sequences" );
+	ImGui::BeginChild( m_strAnimationsId.Get(), ImVec2( 200, -1 ), ImGuiChildFlags_ResizeX );
+	{
+		ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0, 0, 0, 0 ) );
+		if ( ImGui::BeginListBox( "AnimationList", ImVec2( -1, -1 ) ) )
+		{
+			TSkeleton* pSkeleton = m_ModelInstance.pModel->pSkeleton;
+
+			if ( pSkeleton )
+			{
+				TSkeletonSequence* pSequences = pSkeleton->m_SkeletonSequences;
+
+				TBOOL bNoneSelected = ( m_iSelectedSequence == -1 );
+				if ( ImGui::Selectable( "Base Pose", &bNoneSelected ) )
+				{
+					m_ModelInstance.pSkeletonInstance->RemoveAllAnimations();
+					m_iSelectedSequence = -1;
+				}
+
+				for ( TINT i = 0; i < pSkeleton->m_iSequenceCount; i++ )
+				{
+					TBOOL bSelected = ( m_iSelectedSequence == i );
+					if ( ImGui::Selectable( pSequences[ i ].GetName(), &bSelected ) )
+					{
+						m_ModelInstance.pSkeletonInstance->RemoveAllAnimations();
+						m_iSelectedSequence = i;
+					}
+				}
+			}
+
+			ImGui::EndListBox();
+		}
+		ImGui::PopStyleColor();
+
+		ImGui::EndChild();
+	}
+
+	ImGui::SameLine();
+	ImVec2 vPreviewPos = ImGui::GetCursorPos();
+	ImGui::SetCursorPos( ImVec2( vPreviewPos.x, vInitialPos.y ) );
+	ImGui::Text( "Preview" );
+
 	// Prepare camera
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
-
-	ImGui::DragFloat( "Camera Distance", &m_fCameraDistanceTarget, 0.1f, 0.0f, 50.0f );
-	ImGui::DragFloat( "Camera FOV", &m_fCameraFOV, 0.1f, 10.0f, 90.0f );
 
 	m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
 	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
@@ -96,6 +141,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	m_oCamera->SetMatrix( oCameraMatrix );
 
 	// Update render context
+	ImGui::SetCursorPos( vPreviewPos );
 	ImVec2 oRegion = ImGui::GetContentRegionAvail();
 	
 	g_pRenderGL->SetRenderContext( m_oRenderContext );
@@ -118,11 +164,13 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		{
 			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel ) )
 			{
-				if ( !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
-					m_ModelInstance.pSkeletonInstance->AddAnimationFull( 0, 1.0f, 0.5f, 0.5f, TAnimation::Flags_Managed );
+				if ( m_iSelectedSequence != -1 && !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+					m_ModelInstance.pSkeletonInstance->AddAnimationFull( m_iSelectedSequence, 1.0f, 0.0f, 0.0f, TAnimation::Flags_Managed );
 
 				m_ModelInstance.pSkeletonInstance->UpdateTime( flDeltaTime );
-				m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
+
+				if ( m_iSelectedSequence == -1 || m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+					m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
 
 				m_oRenderContext.SetSkeletonInstance( m_ModelInstance.pSkeletonInstance );
 			}
@@ -139,7 +187,6 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	g_pRenderGL->SetDefaultRenderContext();
 
 	// Render to the viewport
-	ImVec2 oImagePos = ImGui::GetCursorPos();
 	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( oRegion.x, oRegion.y ), ImVec2( 0.0f, oRegion.y / 1080.0f ), ImVec2( oRegion.x / 1920.0f, 0.0f ) );
 
 	// Control camera
@@ -196,7 +243,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		iNumMessages += 1;
 
 		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.78f, 0.0f, 0.75f ) );
-		ImGui::SetCursorPos( ImVec2( 20.0f, oImagePos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
+		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
 		ImGui::Text( szMessage );
 		ImGui::PopStyleColor();
 	};
@@ -205,7 +252,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		iNumMessages += 1;
 
 		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
-		ImGui::SetCursorPos( ImVec2( 20.0f, oImagePos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
+		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
 		ImGui::Text( szMessage );
 		ImGui::PopStyleColor();
 	};

@@ -42,11 +42,7 @@ public:
 struct ModelInstance
 {
 	ModelInstance() = default;
-	~ModelInstance()
-	{
-		if ( pSkeletonInstance )
-			delete pSkeletonInstance;
-	}
+	~ModelInstance();
 
 	Toshi::T2SharedPtr<ResourceLoader::Model> pModel;
 	Toshi::TTransformObject                   oTransform;

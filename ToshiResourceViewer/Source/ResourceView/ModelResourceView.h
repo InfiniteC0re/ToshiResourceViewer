@@ -23,7 +23,9 @@ public:
 
 private:
 	Toshi::TString8               m_strTKLName;
+	Toshi::T2FormatString64       m_strAnimationsId;
 	ResourceLoader::ModelInstance m_ModelInstance;
+	TINT                          m_iSelectedSequence;
 
 	Toshi::T2Camera        m_oCamera;
 	Toshi::T2RenderContext m_oRenderContext;
