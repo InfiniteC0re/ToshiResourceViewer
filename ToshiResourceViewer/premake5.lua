@@ -5,6 +5,8 @@ project "ToshiResourceViewer"
 	pchheader "pch.h"
 	pchsource "Source/pch.cpp"
 	
+	debugdir ("%{wks.location}/Assets")
+	
 	links
 	{
 		"Toshi",
