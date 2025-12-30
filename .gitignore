@@ -1,6 +1,8 @@
 # Ignore game assets
 Game/
 
+imgui.ini
+
 # Ignore auto generated files
 APooledStrings.cpp
 
