@@ -1,5 +1,6 @@
 #pragma once
 #include "Resource/StreamedTexture.h"
+#include "Mesh.h"
 
 #include <Toshi/TSingleton.h>
 #include <Render/TMesh.h>
@@ -10,17 +11,17 @@
 #include <Platform/GL/T2GLTexture_GL.h>
 #include <Platform/GL/T2RenderBuffer_GL.h>
 
-class SkinMesh
-    : public Toshi::TMesh
+class SkinMesh : public Mesh
 {
 public:
-	TDECLARE_CLASS( SkinMesh, Toshi::TMesh );
+	TDECLARE_CLASS( SkinMesh, Mesh );
 
 	struct SubMesh
 	{
 		Toshi::T2IndexBuffer  oIndexBuffer;
 		Toshi::T2VertexArray  oVertexArray;
-		TUINT32               uiNumVertices;
+		TUINT32               uiNumAllocatedVertices;
+		TUINT32               uiNumUsedVertices;
 		TUINT32               uiNumIndices;
 		TUINT32               uiNumBones;
 		TINT                  aBones[ 28 ];
@@ -36,8 +37,16 @@ public:
 	};
 
 public:
+	//-----------------------------------------------------------------------------
+	// Toshi::TMesh
+	//-----------------------------------------------------------------------------
 	virtual TBOOL Render() OVERRIDE;
 	virtual void  OnDestroy() OVERRIDE;
+
+	//-----------------------------------------------------------------------------
+	// Mesh
+	//-----------------------------------------------------------------------------
+	virtual TBOOL SerializeGLTFMesh( tinygltf::Model& a_rOutModel ) OVERRIDE;
 
 public:
 	Toshi::T2VertexBuffer           oVertexBuffer;

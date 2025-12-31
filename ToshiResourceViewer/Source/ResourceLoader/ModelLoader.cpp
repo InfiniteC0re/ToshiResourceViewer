@@ -63,6 +63,7 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 		pMaterial->SetTexture( pTexture );
 		pModel->vecUsedTextures.PushBack( pTexture );
 
+		pMesh->SetName( symbolName.Get() );
 		pMesh->SetMaterial( pMaterial );
 		pMesh->vecSubMeshes.Reserve( uiNumSubMeshes );
 
@@ -73,18 +74,19 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 			auto pSubMesh    = &pMesh->vecSubMeshes.PushBack();
 			auto pTRBSubMesh = &pTRBMesh->m_pSubMeshes[ k ];
 
-			pSubMesh->uiNumIndices  = pTRBSubMesh->m_uiNumIndices;
-			pSubMesh->uiNumVertices = pTRBSubMesh->m_uiNumVertices1;
-			pSubMesh->uiNumBones    = pTRBSubMesh->m_uiNumBones;
+			pSubMesh->uiNumIndices           = pTRBSubMesh->m_uiNumIndices;
+			pSubMesh->uiNumAllocatedVertices = pTRBSubMesh->m_uiNumVertices1;
+			pSubMesh->uiNumUsedVertices      = pTRBSubMesh->m_uiNumVertices2;
+			pSubMesh->uiNumBones             = pTRBSubMesh->m_uiNumBones;
 			TUtil::MemCopy( pSubMesh->aBones, pTRBSubMesh->m_pBones, pTRBSubMesh->m_uiNumBones * sizeof( TINT ) );
 
 			// Create render buffers
 			T2VertexArray::Unbind();
 			
-			if ( pSubMesh->uiNumVertices > 0 )
-				pMesh->oVertexBuffer = T2Render::CreateVertexBuffer( pTRBSubMesh->m_pVertices, pSubMesh->uiNumVertices * 40, GL_STATIC_DRAW );
+			if ( pSubMesh->uiNumAllocatedVertices > 0 )
+				pMesh->oVertexBuffer = T2Render::CreateVertexBuffer( pTRBSubMesh->m_pVertices, pSubMesh->uiNumAllocatedVertices * 40, GL_STATIC_DRAW );
 
-			pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pTRBSubMesh->m_pIndices, pSubMesh->uiNumIndices, GL_STATIC_DRAW );
+			pSubMesh->oIndexBuffer = T2Render::CreateIndexBuffer( pTRBSubMesh->m_pIndices, pSubMesh->uiNumIndices, GL_STATIC_DRAW );
 
 			pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
 			pSubMesh->oVertexArray.Bind();

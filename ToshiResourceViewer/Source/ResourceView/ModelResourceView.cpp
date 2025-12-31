@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ModelResourceView.h"
+#include "Shader/Mesh.h"
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
 
@@ -7,6 +8,8 @@
 #include <assimp/Exporter.hpp>
 #include <assimp/scene.h>
 #include <imgui_internal.h>
+
+#include "tiny_gltf.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -51,7 +54,7 @@ TBOOL ModelResourceView::OnCreate()
 
 		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
 		m_ModelInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
-		m_ModelInstance.oTransform.SetEuler( TVector3( TMath::PI * 0.5f, 0.0f, 0.0f ) );
+		m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
 		m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
 	}
 	
@@ -142,7 +145,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	vecDirection.Normalise();
 
 	oCameraMatrix.SetTranslation( vecPosition + m_vecCameraCenter );
-	oCameraMatrix.LookAtDirection( vecDirection, TVector4( 0.0f, -1.0f, 0.0f ) );
+	oCameraMatrix.LookAtDirection( vecDirection, TVector4( 0.0f, 1.0f, 0.0f ) );
 
 	m_oCamera->SetMatrix( oCameraMatrix );
 
@@ -202,9 +205,9 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		TMath::Clip( m_fCameraDistanceTarget, 0.0f, 50.0f );
 		
 		static TBOOL s_bWasDragging = TFALSE;
-		TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Middle );
+		TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Right );
 		
-		if ( ImGui::IsMouseDown( ImGuiMouseButton_Middle ) )
+		if ( bIsDragging )
 		{
 			static ImVec2 s_vLastPos  = ImGui::GetMousePos();
 			ImVec2        vCurrentPos = ImGui::GetMousePos();
@@ -212,7 +215,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		
 			if ( s_bWasDragging )
 			{
-				if ( ImGui::IsKeyDown( ImGuiKey_LeftShift ) )
+				if ( !ImGui::IsKeyDown( ImGuiKey_LeftShift ) )
 				{
 					TVector4 vecUpAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_UP );
 					TVector4 vecRightAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_RIGHT );
@@ -225,8 +228,8 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 				}
 				else
 				{
-					m_fCameraRotX -= vDrag.x * 0.005f;
-					m_fCameraRotY += vDrag.y * 0.0025f;
+					m_fCameraRotX += vDrag.x * 0.005f;
+					m_fCameraRotY -= vDrag.y * 0.0025f;
 
 					TMath::Clip( m_fCameraRotY, -TMath::HALF_PI, TMath::HALF_PI );
 				}
@@ -263,8 +266,8 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		ImGui::PopStyleColor();
 	};
 
-	fnPrintMessage( "Hold Middle Mouse Button + Shift to move camera center." );
-	fnPrintMessage( "Hold Middle Mouse Button to rotate camera." );
+	fnPrintMessage( "Hold Right Mouse Button + Shift to rotate camera." );
+	fnPrintMessage( "Hold Right Mouse Button to move camera center." );
 	
 	if ( m_ModelInstance.pModel->pKeyLib->IsDummy() )
 	{
@@ -284,13 +287,48 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 void ModelResourceView::ExportScene()
 {
-	/*aiScene scene;
+	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
+	if ( !pModel ) return;
 
-	scene.mRootNode = new aiNode();
+	tinygltf::Model gltfModel;
+	tinygltf::Scene gltfScene;
 
-	scene.mMaterials      = new aiMaterial*[ 1 ];
-	scene.mMaterials[ 0 ] = TNULL;
-	scene.mNumMaterials   = 1;
+	tinygltf::Node gltfRootNode;
+	gltfRootNode.name = m_strFileName.GetString();
 
-	scene.mMaterials[ 0 ] = new aiMaterial();*/
+	for ( TINT k = 0; k < pModel->iLODCount; k++ )
+	{
+		// For each LOD...
+		TSIZE uiStartMesh = gltfModel.meshes.size();
+
+		// Serialize meshes
+		Toshi::TModelLOD* pLOD = &pModel->aLODs[ 0 ];
+		for ( TINT i = 0; i < pLOD->iNumMeshes; i++ )
+		{
+			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
+
+			TBOOL bSerialized = pMesh->SerializeGLTFMesh( gltfModel );
+			TASSERT( bSerialized == TTRUE );
+		}
+
+		// Setup LOD node
+		tinygltf::Node gltfLODNode;
+		for ( TSIZE i = uiStartMesh; i < gltfModel.meshes.size(); i++ ) gltfLODNode.children.push_back( i );
+
+		TQuaternion quatRotation;
+		quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
+		gltfLODNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
+		gltfLODNode.name = TString8::VarArgs( "LOD%d", k ).GetString();
+
+		// Add LOD node
+		gltfModel.nodes.push_back( gltfLODNode );
+		gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
+	}
+
+	gltfModel.nodes.push_back( gltfRootNode );
+	gltfScene.nodes.push_back( gltfModel.nodes.size() - 1 );
+	gltfModel.scenes.push_back( gltfScene );
+
+	tinygltf::TinyGLTF gltfWriter;
+	gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
 }

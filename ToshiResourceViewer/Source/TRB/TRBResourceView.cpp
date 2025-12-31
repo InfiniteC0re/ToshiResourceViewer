@@ -35,11 +35,12 @@ TBOOL TRBResourceView::OnSave( PTRB* pOutTRB )
 	return TFALSE;
 }
 
-TBOOL TRBResourceView::Create( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName )
+TBOOL TRBResourceView::Create( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName, const TCHAR* pchFileName )
 {
 	m_pTRB          = pTRB;
 	m_pData         = pData;
 	m_strSymbolName = pchSymbolName;
+	m_strFileName   = pchFileName;
 
 	return OnCreate();
 }

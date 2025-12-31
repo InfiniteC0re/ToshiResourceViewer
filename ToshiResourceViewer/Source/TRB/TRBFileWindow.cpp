@@ -95,8 +95,10 @@ TBOOL TRBFileWindow::LoadFile( Toshi::T2StringView strFilePath )
 			if ( !pResourceView )
 				continue;
 
+			TString8 strFileNameNoExt = strFileName.Mid( 0, strFileName.FindReverse( '.' ) );
+
 			// Initialise resource view from the data stored within TRB
-			if ( !pResourceView->Create( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get(), pSymbols->GetName( i ) ) )
+			if ( !pResourceView->Create( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get(), pSymbols->GetName( i ), strFileNameNoExt ) )
 			{
 				pResourceView->Destroy();
 				continue;
