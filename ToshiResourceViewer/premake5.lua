@@ -19,6 +19,7 @@ project "ToshiResourceViewer"
 	files
 	{
 		"Source/**.h",
+		"Source/**.hpp",
 		"Source/**.cpp",
 		"Source/**.c",
 	}
