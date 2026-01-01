@@ -171,7 +171,9 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	TINT iMeshStartIndex = TINT( a_rOutModel.meshes.size() );
 	TINT iBufferIndex    = TINT( a_rOutModel.buffers.size() );
 
-	// Find or create material
+	//-----------------------------------------------------------------------------
+	// 1. Materials
+	//-----------------------------------------------------------------------------
 	SkinMaterial* pMaterial = TSTATICCAST( SkinMaterial, GetMaterial() );
 	TINT iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
 
@@ -211,21 +213,48 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	}
 
 	//-----------------------------------------------------------------------------
-	// 1. Vertex Buffer
+	// 2. Vertex Buffer
 	//-----------------------------------------------------------------------------
 	GLint iVertexBufferSize = 0;
 	oVertexBuffer.GetParameter( GL_BUFFER_SIZE, iVertexBufferSize );
+
+	const TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
 
 	// Allocate array for the vertex data
 	Toshi::T2DynamicVector<TBYTE> vecVertices;
 	vecVertices.SetSize( iVertexBufferSize );
 	oVertexBuffer.GetSubData( vecVertices.Begin(), 0, iVertexBufferSize );
 
+	// Data pre-processing
+	SkinVertex* pVertices = (SkinVertex*)&*vecVertices.Begin();
+	{
+		// The joints NEED to be fixed!!! The shader normalizes them and divides by 3, so preprocessing is needed here!!!
+		TUINT uiStartVertex = 0;
+
+		T2_FOREACH( vecSubMeshes, it )
+		{
+			TUINT uiNumSubMeshVertices = ( it->uiNumUsedVertices == uiNumTotalVertices ) ? uiNumTotalVertices - uiStartVertex : it->uiNumUsedVertices;
+
+			TASSERT( uiStartVertex < uiNumTotalVertices );
+			TASSERT( uiStartVertex + uiNumSubMeshVertices <= uiNumTotalVertices );
+
+			for ( TUINT i = uiStartVertex; i < uiStartVertex + uiNumSubMeshVertices; i++ )
+			{
+				pVertices[ i ].Bones[ 0 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 0 ] / 3.0f ) ];
+				pVertices[ i ].Bones[ 1 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 1 ] / 3.0f ) ];
+				pVertices[ i ].Bones[ 2 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 2 ] / 3.0f ) ];
+				pVertices[ i ].Bones[ 3 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 3 ] / 3.0f ) ];
+			}
+
+			uiStartVertex += uiNumSubMeshVertices;
+		}
+	}
+
 	// Insert data to the GLTF buffer
 	gltfBuffer.data.insert( gltfBuffer.data.end(), vecVertices.Begin(), vecVertices.End() );
 
 	//-----------------------------------------------------------------------------
-	// 2. Vertex Buffer View
+	// 3. Vertex Buffer View
 	//-----------------------------------------------------------------------------
 	tinygltf::BufferView gltfBufferViewVertex;
 	gltfBufferViewVertex.buffer = iBufferIndex;
@@ -237,10 +266,8 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewVertex ) );
 	const TINT iVertexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
 
-	const TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
-
 	//-----------------------------------------------------------------------------
-	// 3. Vertex Buffer Accessor
+	// 4. Vertex Buffer Accessor
 	//-----------------------------------------------------------------------------
 	
 	// Calculate min/max vertices
@@ -255,7 +282,6 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 		std::numeric_limits<double>::lowest()
 	};
 
-	SkinVertex* pVertices = (SkinVertex*)&*vecVertices.Begin();
 	for ( TUINT i = 0; i < uiNumTotalVertices; i++ )
 	{
 		min_vals[ 0 ] = TMath::Min( min_vals[ 0 ], double( pVertices[ i ].Position.x ) );
@@ -275,12 +301,35 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	gltfAccPosition.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
 	gltfAccPosition.type = TINYGLTF_TYPE_VEC3;
 	gltfAccPosition.count = uiNumTotalVertices;
-	gltfAccPosition.byteOffset = 0;
+	gltfAccPosition.byteOffset = offsetof( SkinVertex, Position );
 	gltfAccPosition.minValues = std::move( min_vals );
 	gltfAccPosition.maxValues = std::move( max_vals );
 
 	a_rOutModel.accessors.push_back( std::move( gltfAccPosition ) );
 	const TINT iAccPositionIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// Weights
+	tinygltf::Accessor gltfAccWeights;
+	gltfAccWeights.bufferView = iVertexBufferView;
+	gltfAccWeights.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+	gltfAccWeights.type = TINYGLTF_TYPE_VEC4;
+	gltfAccWeights.count = uiNumTotalVertices;
+	gltfAccWeights.normalized = TTRUE;
+	gltfAccWeights.byteOffset = offsetof( SkinVertex, Weights );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccWeights ) );
+	const TINT iAccWeightsIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// Joints
+	tinygltf::Accessor gltfAccJoints;
+	gltfAccJoints.bufferView = iVertexBufferView;
+	gltfAccJoints.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+	gltfAccJoints.type = TINYGLTF_TYPE_VEC4;
+	gltfAccJoints.count = uiNumTotalVertices;
+	gltfAccJoints.byteOffset = offsetof( SkinVertex, Bones );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccJoints ) );
+	const TINT iAccJointsIndex = TINT( a_rOutModel.accessors.size() - 1 );
 
 	// UV
 	tinygltf::Accessor gltfAccUV;
@@ -288,7 +337,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	gltfAccUV.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
 	gltfAccUV.type = TINYGLTF_TYPE_VEC2;
 	gltfAccUV.count = uiNumTotalVertices;
-	gltfAccUV.byteOffset = 32;
+	gltfAccUV.byteOffset = offsetof( SkinVertex, UV );
 
 	a_rOutModel.accessors.push_back( std::move( gltfAccUV ) );
 	const TINT iAccUVIndex = TINT( a_rOutModel.accessors.size() - 1 );
@@ -343,9 +392,9 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 		tinygltf::Mesh gltfMesh;
 		tinygltf::Primitive gltfPrimitive;
 
-		// Add material or use exisiting
-
 		gltfPrimitive.attributes[ "POSITION" ] = iAccPositionIndex;
+		gltfPrimitive.attributes[ "WEIGHTS_0" ] = iAccWeightsIndex;
+		gltfPrimitive.attributes[ "JOINTS_0" ] = iAccJointsIndex;
 		gltfPrimitive.attributes[ "TEXCOORD_0" ] = iAccUVIndex;
 		gltfPrimitive.indices = iAccIndicesIndex;
 		gltfPrimitive.mode = TINYGLTF_MODE_TRIANGLE_STRIP;
@@ -363,6 +412,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	{
 		tinygltf::Node gltfNode;
 		gltfNode.mesh = i;
+		gltfNode.skin = 0;
 
 		gltfNode.name = ( vecSubMeshes.Size() == 1 )
 			? GetName()

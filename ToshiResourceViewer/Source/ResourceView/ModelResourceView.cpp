@@ -3,6 +3,7 @@
 #include "Shader/Mesh.h"
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
+#include <Toshi/T2Map.h>
 
 #include <Platform/GL/T2FrameBuffer_GL.h>
 #include <assimp/Exporter.hpp>
@@ -295,14 +296,111 @@ void ModelResourceView::ExportScene()
 
 	tinygltf::Node gltfRootNode;
 	gltfRootNode.name = m_strFileName.GetString();
+	
+	TQuaternion quatRotation;
+	quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
+	gltfRootNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
+
+	//-----------------------------------------------------------------------------
+	// 2. Skeleton
+	//-----------------------------------------------------------------------------
+	if ( m_ModelInstance.pSkeletonInstance && m_ModelInstance.pSkeletonInstance->GetSkeleton() )
+	{
+		// Create a buffer for IBM
+		tinygltf::Buffer gltfIBMBuffer;
+
+		// Initialise Skin object
+		tinygltf::Skin gltfSkin;
+		gltfSkin.name = "ASkinMesh";
+
+		TSkeleton* pSkeleton = m_ModelInstance.pSkeletonInstance->GetSkeleton();
+
+		// Add all of the bones as separate nodes
+		const TINT iBaseBoneIndex = TINT( gltfModel.nodes.size() );
+		for ( TINT i = 0; i < pSkeleton->GetBoneCount(); i++ )
+		{
+			TSkeletonBone* pBone = pSkeleton->GetBone( i );
+			const TINT iParentBone = pBone->GetParentBone();
+
+			// Copy inverse transform of the bone to the inverse bind matrix buffer
+			gltfIBMBuffer.data.insert( gltfIBMBuffer.data.end(), (TBYTE*)&pBone->GetTransformInv(), (TBYTE*)( &pBone->GetTransformInv() + 1 ) );
+
+			tinygltf::Node gltfBoneNode;
+			gltfBoneNode.name = pBone->GetName();
+
+			// Revert parent transform if needed
+			TMatrix44 matBoneLocal;
+			if ( iParentBone != -1 )
+			{
+				matBoneLocal.Multiply(
+					pSkeleton->GetBone( iParentBone )->GetTransformInv(),
+					pBone->GetTransform()
+				);
+			}
+			else
+			{
+				matBoneLocal = pBone->GetTransform();
+			}
+
+			gltfBoneNode.matrix = {
+				matBoneLocal.m_f11, matBoneLocal.m_f12, matBoneLocal.m_f13, matBoneLocal.m_f14,
+				matBoneLocal.m_f21, matBoneLocal.m_f22, matBoneLocal.m_f23, matBoneLocal.m_f24,
+				matBoneLocal.m_f31, matBoneLocal.m_f32, matBoneLocal.m_f33, matBoneLocal.m_f34,
+				matBoneLocal.m_f41, matBoneLocal.m_f42, matBoneLocal.m_f43, matBoneLocal.m_f44,
+			};
+
+			gltfModel.nodes.push_back( std::move( gltfBoneNode ) );
+			const TINT iBoneIndex = gltfModel.nodes.size() - 1;
+
+			gltfSkin.joints.push_back( iBoneIndex );
+
+			// Set parenting
+			if ( iParentBone == -1 )
+				gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
+			else
+				gltfModel.nodes[ iBaseBoneIndex + iParentBone ].children.push_back( iBoneIndex );
+		}
+
+		// Add the IBM buffer
+		gltfModel.buffers.push_back( gltfIBMBuffer );
+		const TINT iIBMBufferIndex = gltfModel.buffers.size() - 1;
+
+		// Inverse bind buffer view
+		tinygltf::BufferView gltfIBMBufferView;
+		gltfIBMBufferView.buffer = iIBMBufferIndex;
+		gltfIBMBufferView.byteLength = sizeof( TMatrix44 ) * pSkeleton->GetBoneCount();
+
+		gltfModel.bufferViews.push_back( gltfIBMBufferView );
+		const TINT iIBMBufferViewIndex = gltfModel.bufferViews.size() - 1;
+
+		// Inverse bind buffer accessor
+		tinygltf::Accessor gltfAccIBM;
+		gltfAccIBM.bufferView = iIBMBufferViewIndex;
+		gltfAccIBM.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+		gltfAccIBM.type = TINYGLTF_TYPE_MAT4;
+		gltfAccIBM.count = pSkeleton->GetBoneCount();
+
+		gltfModel.accessors.push_back( std::move( gltfAccIBM ) );
+		const TINT iAccIBMIndex = TINT( gltfModel.accessors.size() - 1 );
+
+		// Finally add the Skin object
+		gltfSkin.inverseBindMatrices = iAccIBMIndex;
+		gltfModel.skins.push_back( std::move( gltfSkin ) );
+	}
+
+	//-----------------------------------------------------------------------------
+	// 1. Serialize the meshes
+	//-----------------------------------------------------------------------------
+
+	const TBOOL bHasFewLODs = pModel->iLODCount != 1;
 
 	for ( TINT k = 0; k < pModel->iLODCount; k++ )
 	{
 		// For each LOD...
-		TSIZE uiStartMesh = gltfModel.meshes.size();
+		TSIZE uiStartMesh = gltfModel.nodes.size();
 
 		// Serialize meshes
-		Toshi::TModelLOD* pLOD = &pModel->aLODs[ 0 ];
+		Toshi::TModelLOD* pLOD = &pModel->aLODs[ k ];
 		for ( TINT i = 0; i < pLOD->iNumMeshes; i++ )
 		{
 			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
@@ -310,25 +408,41 @@ void ModelResourceView::ExportScene()
 			TBOOL bSerialized = pMesh->SerializeGLTFMesh( gltfModel, m_ModelInstance.pSkeletonInstance );
 			TASSERT( bSerialized == TTRUE );
 		}
+		
+		TSIZE uiEndMesh = gltfModel.nodes.size();
 
-		// Setup LOD node
-		tinygltf::Node gltfLODNode;
-		for ( TSIZE i = uiStartMesh; i < gltfModel.meshes.size(); i++ ) gltfLODNode.children.push_back( i );
+		if ( bHasFewLODs )
+		{
+			// Setup LOD node
+			tinygltf::Node gltfLODNode;
+			for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
+				gltfLODNode.children.push_back( i );
 
-		TQuaternion quatRotation;
-		quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
-		gltfLODNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
-		gltfLODNode.name = TString8::VarArgs( "LOD%d", k ).GetString();
+			gltfLODNode.name = TString8::VarArgs( "LOD%d", k ).GetString();
 
-		// Add LOD node
-		gltfModel.nodes.push_back( gltfLODNode );
-		gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
+			// Add LOD node
+			gltfModel.nodes.push_back( std::move( gltfLODNode ) );
+			gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
+		}
+		else
+		{
+			// Add straight to the root
+			for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
+			{
+				gltfRootNode.children.push_back( i );
+			}
+		}
+		
 	}
 
-	gltfModel.nodes.push_back( gltfRootNode );
+	// Finalize
+	gltfModel.nodes.push_back( std::move( gltfRootNode ) );
 	gltfScene.nodes.push_back( gltfModel.nodes.size() - 1 );
-	gltfModel.scenes.push_back( gltfScene );
+	gltfModel.scenes.push_back( std::move( gltfScene ) );
 
+	gltfModel.skins[ 0 ].skeleton = gltfModel.nodes.size() - 1;
+
+	// Write to the file
 	tinygltf::TinyGLTF gltfWriter;
 	gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
 }
