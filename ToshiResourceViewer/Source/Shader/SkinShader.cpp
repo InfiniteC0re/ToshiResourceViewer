@@ -244,6 +244,13 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 				pVertices[ i ].Bones[ 1 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 1 ] / 3.0f ) ];
 				pVertices[ i ].Bones[ 2 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 2 ] / 3.0f ) ];
 				pVertices[ i ].Bones[ 3 ] = it->aBones[ TUINT8( pVertices[ i ].Bones[ 3 ] / 3.0f ) ];
+
+				// For some reason models in Barnyard can have zero weight but still assigned a bone
+				// This causes errors, so has to fix it manually here
+				if ( pVertices[ i ].Weights[ 0 ] == 0.0f ) pVertices[ i ].Bones[ 0 ] = 0;
+				if ( pVertices[ i ].Weights[ 1 ] == 0.0f ) pVertices[ i ].Bones[ 1 ] = 0;
+				if ( pVertices[ i ].Weights[ 2 ] == 0.0f ) pVertices[ i ].Bones[ 2 ] = 0;
+				if ( pVertices[ i ].Weights[ 3 ] == 0.0f ) pVertices[ i ].Bones[ 3 ] = 0;
 			}
 
 			uiStartVertex += uiNumSubMeshVertices;
