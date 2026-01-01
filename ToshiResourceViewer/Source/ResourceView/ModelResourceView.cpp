@@ -307,7 +307,7 @@ void ModelResourceView::ExportScene()
 		{
 			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
 
-			TBOOL bSerialized = pMesh->SerializeGLTFMesh( gltfModel );
+			TBOOL bSerialized = pMesh->SerializeGLTFMesh( gltfModel, m_ModelInstance.pSkeletonInstance );
 			TASSERT( bSerialized == TTRUE );
 		}
 

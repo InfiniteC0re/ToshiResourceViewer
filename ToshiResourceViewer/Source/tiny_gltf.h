@@ -1232,6 +1232,26 @@ class Model {
   // Filled when SetStoreOriginalJSONForExtrasAndExtensions is enabled.
   std::string extras_json_string;
   std::string extensions_json_string;
+
+  int FindMaterialIndex( const char* pchName )
+  {
+	  for ( auto& material : materials )
+	  {
+		  if ( material.name == pchName ) return ( &material - &materials[ 0 ] );
+	  }
+
+	  return -1;
+  }
+
+  int FindTextureIndex( const char* pchName )
+  {
+	  for ( auto& texture : textures )
+	  {
+		  if ( texture.name == pchName ) return ( &texture - &textures[ 0 ] );
+	  }
+
+	  return -1;
+  }
 };
 
 enum SectionCheck {
@@ -3290,7 +3310,7 @@ static bool UpdateImageObject(const Image &image, std::string &baseDir,
       // A decode failure results in a failure to write the gltf.
       return false;
     }
-    filename = GetBaseFilename(decoded_uri);
+    filename = decoded_uri;
     ext = GetFilePathExtension(filename);
   } else if (image.bufferView != -1) {
     // If there's no URI and the data exists in a buffer,

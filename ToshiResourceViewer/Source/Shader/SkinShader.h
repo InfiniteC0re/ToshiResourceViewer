@@ -46,7 +46,7 @@ public:
 	//-----------------------------------------------------------------------------
 	// Mesh
 	//-----------------------------------------------------------------------------
-	virtual TBOOL SerializeGLTFMesh( tinygltf::Model& a_rOutModel ) OVERRIDE;
+	virtual TBOOL SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeletonInstance* a_pSkeletonInstance ) OVERRIDE;
 
 public:
 	Toshi::T2VertexBuffer           oVertexBuffer;
@@ -79,6 +79,8 @@ public:
 	{
 		m_pTexture = pTexture;
 	}
+
+	Resource::StreamedTexture* AccessTexture() { return m_pTexture; }
 
 private:
 	Toshi::TOrderTable*                           m_pAssignedOrderTable;

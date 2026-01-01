@@ -61,9 +61,11 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 		);
 
 		pMaterial->SetTexture( pTexture );
+		pMaterial->SetName( pTRBMesh->m_szMaterialName );
 		pModel->vecUsedTextures.PushBack( pTexture );
 
 		pMesh->SetName( symbolName.Get() );
+		pMesh->SetMaterialName( pTRBMesh->m_szMaterialName );
 		pMesh->SetMaterial( pMaterial );
 		pMesh->vecSubMeshes.Reserve( uiNumSubMeshes );
 

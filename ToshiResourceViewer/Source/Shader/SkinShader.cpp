@@ -164,12 +164,51 @@ void SkinMesh::OnDestroy()
 	m_pMaterial = TNULL;
 }
 
-TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
+TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeletonInstance* a_pSkeletonInstance )
 {
 	tinygltf::Buffer gltfBuffer;
 
 	TINT iMeshStartIndex = TINT( a_rOutModel.meshes.size() );
 	TINT iBufferIndex    = TINT( a_rOutModel.buffers.size() );
+
+	// Find or create material
+	SkinMaterial* pMaterial = TSTATICCAST( SkinMaterial, GetMaterial() );
+	TINT iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
+
+	if ( pMaterial && iMaterialIndex == -1 )
+	{
+		// Create new material
+		tinygltf::Material gltfMaterial;
+		gltfMaterial.name = GetMaterialName();
+
+		// Find or create texture
+		TPString8 strTextureUri = pMaterial->AccessTexture()->GetTexture().strName;
+		TINT iTextureIndex = a_rOutModel.FindTextureIndex( strTextureUri );
+		if ( iTextureIndex == -1 )
+		{
+			// Create new texture
+			tinygltf::Image gltfImage;
+			gltfImage.uri = strTextureUri;
+			a_rOutModel.images.push_back( std::move( gltfImage ) );
+
+			tinygltf::Sampler gltfSampler;
+			gltfSampler.minFilter = TINYGLTF_TEXTURE_FILTER_LINEAR;
+			gltfSampler.magFilter = TINYGLTF_TEXTURE_FILTER_LINEAR;
+			a_rOutModel.samplers.push_back( std::move( gltfSampler ) );
+
+			tinygltf::Texture gltfTexture;
+			gltfTexture.source = TINT( a_rOutModel.images.size() - 1 );
+			gltfTexture.sampler = TINT( a_rOutModel.samplers.size() - 1 );
+
+			a_rOutModel.textures.push_back( std::move( gltfTexture ) );
+			iTextureIndex = TINT( a_rOutModel.textures.size() - 1 );
+		}
+
+		// Push the material
+		gltfMaterial.pbrMetallicRoughness.baseColorTexture.index = iTextureIndex;
+		a_rOutModel.materials.push_back( std::move( gltfMaterial ) );
+		iMaterialIndex = TINT( a_rOutModel.materials.size() - 1 );
+	}
 
 	//-----------------------------------------------------------------------------
 	// 1. Vertex Buffer
@@ -195,7 +234,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 	gltfBufferViewVertex.byteStride = sizeof( SkinVertex );
 	gltfBufferViewVertex.target = TINYGLTF_TARGET_ARRAY_BUFFER;
 
-	a_rOutModel.bufferViews.push_back( gltfBufferViewVertex );
+	a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewVertex ) );
 	const TINT iVertexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
 
 	const TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
@@ -228,7 +267,9 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 		max_vals[ 2 ] = TMath::Max( max_vals[ 2 ], double( pVertices[ i ].Position.z ) );
 	}
 	
-	// Define the actual accessor
+	// Define the actual accessors
+
+	// Position
 	tinygltf::Accessor gltfAccPosition;
 	gltfAccPosition.bufferView = iVertexBufferView;
 	gltfAccPosition.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -238,8 +279,19 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 	gltfAccPosition.minValues = std::move( min_vals );
 	gltfAccPosition.maxValues = std::move( max_vals );
 
-	a_rOutModel.accessors.push_back( gltfAccPosition );
+	a_rOutModel.accessors.push_back( std::move( gltfAccPosition ) );
 	const TINT iAccPositionIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// UV
+	tinygltf::Accessor gltfAccUV;
+	gltfAccUV.bufferView = iVertexBufferView;
+	gltfAccUV.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+	gltfAccUV.type = TINYGLTF_TYPE_VEC2;
+	gltfAccUV.count = uiNumTotalVertices;
+	gltfAccUV.byteOffset = 32;
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccUV ) );
+	const TINT iAccUVIndex = TINT( a_rOutModel.accessors.size() - 1 );
 
 	T2_FOREACH( vecSubMeshes, it )
 	{
@@ -268,7 +320,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 		gltfBufferViewIndex.byteLength = iIndexBufferSize;
 		gltfBufferViewIndex.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
 
-		a_rOutModel.bufferViews.push_back( gltfBufferViewIndex );
+		a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewIndex ) );
 		const TINT iIndexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
 
 		//-----------------------------------------------------------------------------
@@ -282,7 +334,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 		gltfAccIndex.type = TINYGLTF_TYPE_SCALAR;
 		gltfAccIndex.count = it->uiNumIndices;
 
-		a_rOutModel.accessors.push_back( gltfAccIndex );
+		a_rOutModel.accessors.push_back( std::move( gltfAccIndex ) );
 		const TINT iAccIndicesIndex = TINT( a_rOutModel.accessors.size() - 1 );
 
 		//-----------------------------------------------------------------------------
@@ -291,16 +343,20 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 		tinygltf::Mesh gltfMesh;
 		tinygltf::Primitive gltfPrimitive;
 
+		// Add material or use exisiting
+
 		gltfPrimitive.attributes[ "POSITION" ] = iAccPositionIndex;
+		gltfPrimitive.attributes[ "TEXCOORD_0" ] = iAccUVIndex;
 		gltfPrimitive.indices = iAccIndicesIndex;
 		gltfPrimitive.mode = TINYGLTF_MODE_TRIANGLE_STRIP;
+		gltfPrimitive.material = iMaterialIndex;
 
-		gltfMesh.primitives.push_back( gltfPrimitive );
-		a_rOutModel.meshes.push_back( gltfMesh );
+		gltfMesh.primitives.push_back( std::move( gltfPrimitive ) );
+		a_rOutModel.meshes.push_back( std::move( gltfMesh ) );
 	}
 
 	// Add the buffer for this mesh
-	a_rOutModel.buffers.push_back( gltfBuffer );
+	a_rOutModel.buffers.push_back( std::move( gltfBuffer ) );
 
 	// Create nodes for each of the meshes
 	for ( TSIZE i = iMeshStartIndex; i < a_rOutModel.meshes.size(); i++ )
@@ -312,7 +368,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel )
 			? GetName()
 			: TString8::VarArgs( "%s_SM%u", GetName(), i - iMeshStartIndex ).GetString();
 		
-		a_rOutModel.nodes.push_back( gltfNode );
+		a_rOutModel.nodes.push_back( std::move( gltfNode ) );
 	}
 
 	return TTRUE;
