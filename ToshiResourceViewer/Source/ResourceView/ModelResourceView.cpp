@@ -53,6 +53,12 @@ TBOOL ModelResourceView::OnCreate()
 		     pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
 			return TFALSE;
 
+		if ( auto pTRBSkeletonHeader = m_pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( m_pTRB->GetSections(), "SkeletonHeader" ) )
+		{
+			// Copy name of the TKL file
+			m_strTKLName = pTRBSkeletonHeader->m_szTKLName;
+		}
+
 		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
 		m_ModelInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
 		m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
@@ -64,12 +70,209 @@ TBOOL ModelResourceView::OnCreate()
 
 TBOOL ModelResourceView::CanSave()
 {
-	return TFALSE;
+	return TTRUE;
 }
 
 TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 {
-	return TFALSE;
+	// TODO: support World mesh type
+	const TBOOL bIsSkinnedMesh = TTRUE;
+	if ( !bIsSkinnedMesh ) return TFALSE;
+
+	PTRBSections* pSECT = pOutTRB->GetSections();
+	PTRBSymbols* pSYMB = pOutTRB->GetSymbols();
+
+	PTRBSections::MemoryStream* pMemStream = pSECT->GetStack( 0 );
+
+	// Allocate FileHeader symbol
+	auto pTRBFileHeader = pMemStream->Alloc<TTMDBase::FileHeader>();
+	pTRBFileHeader->m_uiMagic = pOutTRB->ConvertEndianess( TFourCC( "TMDL" ) );
+	pTRBFileHeader->m_uiZero1 = pOutTRB->ConvertEndianess( 0 );
+	pTRBFileHeader->m_uiVersionMajor = pOutTRB->ConvertEndianess( TTMD_VERSION_MAJOR );
+	pTRBFileHeader->m_uiVersionMinor = pOutTRB->ConvertEndianess( TTMD_VERSION_MINOR );
+	pTRBFileHeader->m_uiZero2 = pOutTRB->ConvertEndianess( 0 );
+	pSYMB->Add( pMemStream, "FileHeader", pTRBFileHeader.get() );
+
+	// Allocate SkeletonHeader symbol
+	auto pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
+	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, m_strTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
+	pTRBSkeletonHeader->m_iTKeyCount = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeletonHeader->m_iQKeyCount = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeletonHeader->m_iSKeyCount = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
+	pTRBSkeletonHeader->m_iTBaseIndex = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeletonHeader->m_iQBaseIndex = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeletonHeader->m_iSBaseIndex = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
+	pSYMB->Add( pMemStream, "SkeletonHeader", pTRBSkeletonHeader.get() );
+
+	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
+	TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
+
+	// Allocate Skeleton symbol
+	const TINT iNumBones = pSkeleton->m_iBoneCount;
+	const TINT iNumSeq = pSkeleton->m_iSequenceCount;
+
+	auto pTRBSkeleton = pMemStream->Alloc<TSkeleton>();
+	pTRBSkeleton->m_iBoneCount = pOutTRB->ConvertEndianess( iNumBones );
+	pTRBSkeleton->m_iManualBoneCount = pOutTRB->ConvertEndianess( pSkeleton->m_iManualBoneCount );
+	pTRBSkeleton->m_iSequenceCount = pOutTRB->ConvertEndianess( iNumSeq );
+	pTRBSkeleton->m_iAnimationMaxCount = pOutTRB->ConvertEndianess( pSkeleton->m_iAnimationMaxCount );
+	pTRBSkeleton->m_iInstanceCount = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeleton->m_eQuatLerpType = pOutTRB->ConvertEndianess( TSkeleton::QUATINTERP_Default );
+	
+	// Copy info about the bones
+	pMemStream->Alloc<TSkeletonBone>( &pTRBSkeleton->m_pBones, iNumBones );
+	for ( TINT i = 0; i < iNumBones; i++ )
+		TUtil::MemCopy( &pTRBSkeleton->m_pBones[ i ], &pSkeleton->m_pBones[ i ], sizeof( TSkeletonBone ) );
+
+	// Copy info about the sequences
+	auto pTRBSkeletonSeq = pMemStream->Alloc<TSkeletonSequence>( &pTRBSkeleton->m_SkeletonSequences, iNumSeq );
+	for ( TINT i = 0; i < iNumSeq; i++ )
+	{
+		auto pSeq = pSkeleton->GetSequence( i );
+		auto pTRBSeq = pTRBSkeletonSeq + i;
+
+		pTRBSeq->m_iNameLength = pOutTRB->ConvertEndianess( pSeq->m_iNameLength );
+		T2String8::Copy( pTRBSeq->m_szName, pSeq->m_szName, sizeof( pTRBSeq->m_szName ) - 1 );
+		
+		pTRBSeq->m_eFlags = pOutTRB->ConvertEndianess( pSeq->m_eFlags );
+		pTRBSeq->m_iUnk2 = pOutTRB->ConvertEndianess( pSeq->m_iUnk2 );
+		pTRBSeq->m_iNumUsedBones = pOutTRB->ConvertEndianess( pSeq->m_iNumUsedBones );
+		pTRBSeq->m_fDuration = pOutTRB->ConvertEndianess( pSeq->m_fDuration );
+
+		// Now, copy all animated bones of this sequence
+		auto pTRBSeqBones = pMemStream->Alloc<TSkeletonSequenceBone>( &pTRBSeq->m_pSeqBones, iNumBones );
+		for ( TINT k = 0; k < iNumBones; k++ )
+		{
+			auto pSeqBone = &pSeq->m_pSeqBones[ k ];
+			auto pTRBSeqBone = pTRBSeqBones + k;
+
+			const TINT iKeySize = pSeqBone->m_iKeySize;
+			const TINT iNumKeys = pSeqBone->m_iNumKeys;
+
+			TASSERT( iKeySize == 4 || iKeySize == 6 ); // time, quaternion (+ translation sometimes)
+			pTRBSeqBone->m_eFlags = pOutTRB->ConvertEndianess( pSeqBone->m_eFlags );
+			pTRBSeqBone->m_iKeySize = pOutTRB->ConvertEndianess( iKeySize );
+			pTRBSeqBone->m_iNumKeys = pOutTRB->ConvertEndianess( iNumKeys );
+			
+			// Copy keyframe data
+			pMemStream->Alloc<TBYTE>( &pTRBSeqBone->m_pData, iKeySize * iNumKeys );
+
+			for ( TINT j = 0; j < iNumKeys; j++ )
+			{
+				TUINT16* pKeyData = pSeqBone->GetKey( j );
+				TUINT16* pTRBKeyData = pTRBSeqBone->GetKey( j );
+
+				pTRBKeyData[ 0 ] = pOutTRB->ConvertEndianess( pKeyData[ 0 ] );
+				pTRBKeyData[ 1 ] = pOutTRB->ConvertEndianess( pKeyData[ 1 ] );
+				if ( iKeySize == 6 ) pTRBKeyData[ 2 ] = pOutTRB->ConvertEndianess( pKeyData[ 2 ] );
+			}
+		}
+	}
+
+	pSYMB->Add( pMemStream, "Skeleton", pTRBSkeleton.get() );
+
+	// Allocate Materials symbol
+	T2Map<TPString8, TString8, TPString8::Comparator> mapMaterials;
+	auto pTRBMaterialsHeader = pMemStream->Alloc<TTMDBase::MaterialsHeader>();
+
+	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
+
+	// Find all materials
+	TINT iNumMaterials = 0;
+	for ( TINT k = 0; k < pModel->iLODCount; k++ )
+	{
+		TString8 strMaterialName;
+		TString8 strTextureName;
+
+		Toshi::TModelLOD* pLOD = &pModel->aLODs[ k ];
+		for ( TINT i = 0; i < pLOD->iNumMeshes; i++ )
+		{
+			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
+			pMesh->GetMaterialInfo( strMaterialName, strTextureName );
+
+			if ( mapMaterials.Find( TPS8D( strMaterialName ) ) == mapMaterials.End() )
+			{
+				// It's the first time we encounter this material
+				iNumMaterials += 1;
+				mapMaterials.Insert( TPS8D( strMaterialName ), strTextureName );
+			}
+		}
+	}
+
+	// Write all materials
+	pTRBMaterialsHeader->iNumMaterials = pOutTRB->ConvertEndianess( iNumMaterials );
+	pTRBMaterialsHeader->uiSectionSize = pOutTRB->ConvertEndianess( sizeof( TTMDBase::Material ) * iNumMaterials );
+
+	auto pTRBMaterials = pMemStream->Alloc<TTMDBase::Material>( iNumMaterials );
+	TINT iNumWrittenMats = 0;
+	T2_FOREACH( mapMaterials, it )
+	{
+		auto pTRBMaterial = pTRBMaterials + iNumWrittenMats;
+
+		T2String8::Copy( pTRBMaterial->szMatName, it->first.GetString(), sizeof( pTRBMaterial->szMatName ) - 1 );
+		T2String8::Copy( pTRBMaterial->szTextureFile, it->second.GetString(), sizeof( pTRBMaterial->szTextureFile ) - 1 );
+
+		iNumWrittenMats += 1;
+	}
+
+	pSYMB->Add( pMemStream, "Materials", pTRBMaterialsHeader.get() );
+
+	// Write collision
+	// NOTE: we don't support collision at the moment
+	auto pTRBCollision = pMemStream->Alloc<TTMDBase::CollisionHeader>();
+	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( 0 );
+
+	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
+
+	// Write the main TTMD header (Windows) and information about the LODs
+	const TINT iNumLODs = pModel->iLODCount;
+
+	auto pTRBWinHeader = pMemStream->Alloc<TTMDWin::TRBWinHeader>();
+	pTRBWinHeader->m_iNumLODs     = pOutTRB->ConvertEndianess( iNumLODs );
+	pTRBWinHeader->m_fLODDistance = pOutTRB->ConvertEndianess( pModel->fLODDistance );
+
+	auto pTRBLODs = pMemStream->Alloc<TTMDWin::TRBLODHeader>( iNumLODs );
+	for ( TINT i = 0; i < iNumLODs; i++ )
+	{
+		auto pLOD    = &pModel->aLODs[ i ];
+		auto pTRBLOD = pTRBLODs + i;
+
+		pTRBLOD->m_iMeshCount1 = pOutTRB->ConvertEndianess( pLOD->iNumMeshes );
+		pTRBLOD->m_iMeshCount2 = pOutTRB->ConvertEndianess( 0 );
+		pTRBLOD->m_eShader     = pOutTRB->ConvertEndianess( TTMDWin::ST_SKIN );
+		pTRBLOD->m_RenderVolume.Set(
+		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().x ),
+		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().y ),
+		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().z ),
+		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().w )
+		);
+	}
+
+	pSYMB->Add( pMemStream, "Header", pTRBWinHeader.get() );
+
+	// Write all meshes
+	for ( TINT i = 0; i < iNumLODs; i++ )
+	{
+		auto pLOD = &pModel->aLODs[ i ];
+
+		const TINT iMeshCount = pLOD->iNumMeshes;
+		for ( TINT k = 0; k < iMeshCount; k++ )
+		{
+			Mesh* pMesh       = TSTATICCAST( Mesh, pLOD->ppMeshes[ k ] );
+			auto  pTRBLODMesh = pMemStream->Alloc<TTMDWin::TRBLODMesh>();
+
+			// Serialize TRB Mesh
+			TBOOL bSerializeResult = pMesh->SerializeTRBMesh( pOutTRB, pTRBLODMesh );
+			TASSERT( bSerializeResult == TTRUE );
+
+			// Add mesh symbol
+			char szSymbolName[ 24 ];
+			TStringManager::String8Format( szSymbolName, sizeof( szSymbolName ), "LOD%d_Mesh_%d", i, k );
+			pSYMB->Add( pMemStream, szSymbolName, pTRBLODMesh.get() );
+		}
+	}
+
+	return TTRUE;
 }
 
 void ModelResourceView::OnDestroy()

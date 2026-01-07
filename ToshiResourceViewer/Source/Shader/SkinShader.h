@@ -47,6 +47,8 @@ public:
 	// Mesh
 	//-----------------------------------------------------------------------------
 	virtual TBOOL SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeletonInstance* a_pSkeletonInstance ) OVERRIDE;
+	virtual TBOOL SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<Toshi::TTMDWin::TRBLODMesh> a_pMesh ) OVERRIDE;
+	virtual void GetMaterialInfo( Toshi::TString8& a_rMatName, Toshi::TString8& a_rTexName ) OVERRIDE;
 
 public:
 	Toshi::T2VertexBuffer           oVertexBuffer;

@@ -431,6 +431,147 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	return TTRUE;
 }
 
+TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<Toshi::TTMDWin::TRBLODMesh> a_pTRBMesh )
+{
+	auto pMemStream = a_pTRBMesh.stack();
+
+	//-----------------------------------------------------------------------------
+	// 1. Basic Info
+	//-----------------------------------------------------------------------------
+	const TUINT uiNumSubMeshes = vecSubMeshes.Size();
+	TUINT       uiNumIndices  = 0;
+
+	a_pTRBMesh->m_uiNumSubMeshes = a_pTRB->ConvertEndianess( uiNumSubMeshes );
+
+	const TCHAR* pchMaterialName = GetMaterialName();
+	pMemStream->Alloc<TCHAR>( &a_pTRBMesh->m_szMaterialName, T2String8::Length( pchMaterialName ) + 1 );
+	T2String8::Copy( a_pTRBMesh->m_szMaterialName, pchMaterialName );
+
+	//-----------------------------------------------------------------------------
+	// 2. Vertex Buffer
+	//-----------------------------------------------------------------------------
+	GLint iVertexBufferSize = 0;
+	oVertexBuffer.GetParameter( GL_BUFFER_SIZE, iVertexBufferSize );
+
+	const TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
+
+	// Allocate array for the vertex data
+	Toshi::T2DynamicVector<TBYTE> vecVertices;
+	vecVertices.SetSize( iVertexBufferSize );
+	oVertexBuffer.GetSubData( vecVertices.Begin(), 0, iVertexBufferSize );
+	SkinVertex* pVertices = (SkinVertex*)&*vecVertices.Begin();
+
+	a_pTRBMesh->m_uiNumVertices = a_pTRB->ConvertEndianess( uiNumTotalVertices );
+
+	//-----------------------------------------------------------------------------
+	// 3. Sub Meshes
+	//-----------------------------------------------------------------------------
+	auto pTRBSubMeshes = pMemStream->Alloc<TTMDWin::SubMesh>( &a_pTRBMesh->m_pSubMeshes, uiNumSubMeshes );
+
+	for ( TUINT i = 0; i < uiNumSubMeshes; i++ )
+	{
+		auto pSubMesh    = &vecSubMeshes[ i ];
+		auto pTRBSubMesh = pTRBSubMeshes + i;
+
+		const TBOOL bAllocateVertexBuffer = ( i == 0 );
+		TASSERT( bAllocateVertexBuffer || pSubMesh->uiNumAllocatedVertices == 0 );
+		TASSERT( !bAllocateVertexBuffer || pSubMesh->uiNumAllocatedVertices == uiNumTotalVertices );
+
+		pTRBSubMesh->m_uiNumVertices1 = a_pTRB->ConvertEndianess( bAllocateVertexBuffer ? uiNumTotalVertices : 0 );
+		pTRBSubMesh->m_uiNumVertices2 = a_pTRB->ConvertEndianess( pSubMesh->uiNumUsedVertices );
+		pTRBSubMesh->m_uiNumIndices   = a_pTRB->ConvertEndianess( pSubMesh->uiNumIndices );
+		pTRBSubMesh->m_uiNumBones     = a_pTRB->ConvertEndianess( pSubMesh->uiNumBones );
+		pTRBSubMesh->m_Zero           = a_pTRB->ConvertEndianess( 0 );
+		pTRBSubMesh->m_Unk2           = a_pTRB->ConvertEndianess( 1277680 );
+		pTRBSubMesh->m_Unk3           = a_pTRB->ConvertEndianess( 2034559604 );
+		pTRBSubMesh->m_Unk4           = a_pTRB->ConvertEndianess( 2034728964 );
+		pTRBSubMesh->m_Unk5           = a_pTRB->ConvertEndianess( 2034474770 );
+		pTRBSubMesh->m_Unk6           = a_pTRB->ConvertEndianess( 2034728980 );
+
+		// Allocate bones
+		TASSERT( pSubMesh->uiNumBones <= 28 );
+		auto pTRBBones = pMemStream->Alloc<TUINT>( &pTRBSubMesh->m_pBones, pSubMesh->uiNumBones );
+		for ( TUINT k = 0; k < pSubMesh->uiNumBones; k++ )
+		{
+			auto pBone    = pSubMesh->aBones + k;
+			auto pTRBBone = pTRBBones + k;
+
+			*pTRBBone = a_pTRB->ConvertEndianess( *pBone );
+		}
+
+		// Allocate indices
+		GLint iIndexBufferSize = 0;
+		pSubMesh->oVertexArray.GetIndexBuffer().GetParameter( GL_BUFFER_SIZE, iIndexBufferSize );
+
+		Toshi::T2DynamicVector<TBYTE> vecIndices;
+		vecIndices.SetSize( iIndexBufferSize );
+		pSubMesh->oVertexArray.GetIndexBuffer().GetSubData( vecIndices.Begin(), 0, iIndexBufferSize );
+		TUINT16* pIndices = (TUINT16*)&*vecIndices.Begin();
+
+		TASSERT( pSubMesh->uiNumIndices == ( iIndexBufferSize / sizeof( *pIndices ) ) );
+
+		auto pTRBIndices = pMemStream->Alloc<TUINT16>( &pTRBSubMesh->m_pIndices, pSubMesh->uiNumIndices );
+		for ( TUINT k = 0; k < pSubMesh->uiNumIndices; k++ )
+		{
+			auto pIndex    = pIndices + k;
+			auto pTRBIndex = pTRBIndices + k;
+
+			*pTRBIndex = a_pTRB->ConvertEndianess( *pIndex );
+		}
+
+		uiNumIndices += pSubMesh->uiNumIndices;
+
+		// Allocate vertices
+		// Vertex buffer is allocated only for the first mesh
+		if ( bAllocateVertexBuffer )
+		{
+			auto pTRBVertices = pMemStream->Alloc<TTMDWin::SkinVertex>( &pTRBSubMesh->m_pVertices, uiNumTotalVertices );
+
+			for ( TUINT k = 0; k < uiNumTotalVertices; k++ )
+			{
+				auto pVertex    = pVertices + k;
+				auto pTRBVertex = pTRBVertices + k;
+
+				pTRBVertex->Position.x = a_pTRB->ConvertEndianess( pVertex->Position.x );
+				pTRBVertex->Position.y = a_pTRB->ConvertEndianess( pVertex->Position.y );
+				pTRBVertex->Position.z = a_pTRB->ConvertEndianess( pVertex->Position.z );
+
+				pTRBVertex->Normal.x = a_pTRB->ConvertEndianess( pVertex->Normal.x );
+				pTRBVertex->Normal.y = a_pTRB->ConvertEndianess( pVertex->Normal.y );
+				pTRBVertex->Normal.z = a_pTRB->ConvertEndianess( pVertex->Normal.z );
+
+				pTRBVertex->Weights[ 0 ] = a_pTRB->ConvertEndianess( pVertex->Weights[ 0 ] );
+				pTRBVertex->Weights[ 1 ] = a_pTRB->ConvertEndianess( pVertex->Weights[ 1 ] );
+				pTRBVertex->Weights[ 2 ] = a_pTRB->ConvertEndianess( pVertex->Weights[ 2 ] );
+				pTRBVertex->Weights[ 3 ] = a_pTRB->ConvertEndianess( pVertex->Weights[ 3 ] );
+
+				pTRBVertex->Bones[ 0 ] = a_pTRB->ConvertEndianess( pVertex->Bones[ 0 ] );
+				pTRBVertex->Bones[ 1 ] = a_pTRB->ConvertEndianess( pVertex->Bones[ 1 ] );
+				pTRBVertex->Bones[ 2 ] = a_pTRB->ConvertEndianess( pVertex->Bones[ 2 ] );
+				pTRBVertex->Bones[ 3 ] = a_pTRB->ConvertEndianess( pVertex->Bones[ 3 ] );
+
+				pTRBVertex->UV.x = a_pTRB->ConvertEndianess( pVertex->UV.x );
+				pTRBVertex->UV.y = a_pTRB->ConvertEndianess( pVertex->UV.y );
+			}
+		}
+	}
+
+	//-----------------------------------------------------------------------------
+	// 2. Finish
+	//-----------------------------------------------------------------------------
+	a_pTRBMesh->m_uiNumIndices = a_pTRB->ConvertEndianess( uiNumIndices );
+	
+	return TTRUE;
+}
+
+void SkinMesh::GetMaterialInfo( Toshi::TString8& a_rMatName, Toshi::TString8& a_rTexName )
+{
+	SkinMaterial* pMaterial = TSTATICCAST( SkinMaterial, GetMaterial() );
+
+	a_rMatName = GetMaterialName();
+	a_rTexName = pMaterial->AccessTexture()->GetTexture().strName;
+}
+
 void SkinMaterial::PreRender()
 {
 	g_pRenderGL->SetTexture2D( 0, m_pTexture->GetHandle() );
