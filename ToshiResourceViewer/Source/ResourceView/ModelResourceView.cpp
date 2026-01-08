@@ -40,32 +40,46 @@ ModelResourceView::~ModelResourceView()
 {
 }
 
-TBOOL ModelResourceView::OnCreate()
+TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 {
 	// Create unique IDs
 	m_strAnimationsId.Format( "##Animations%u", GetImGuiID() );
 
-	if ( m_strSymbolName == "FileHeader" )
+	if ( m_bIsExternal )
 	{
-		TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
+		// Create from GLTF
 
-		if ( pFileHeader->m_uiMagic != TFourCC( "TMDL" ) &&
-		     pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
-			return TFALSE;
-
-		if ( auto pTRBSkeletonHeader = m_pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( m_pTRB->GetSections(), "SkeletonHeader" ) )
-		{
-			// Copy name of the TKL file
-			m_strTKLName = pTRBSkeletonHeader->m_szTKLName;
-		}
-
-		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
-		m_ModelInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
-		m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
-		m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
+		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( pchFilePath ), m_ModelInstance );
 	}
+	else
+	{
+		// Create from TRB
+
+		// Skinned mesh
+		if ( m_strSymbolName == "FileHeader" )
+		{
+			TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
+
+			if ( pFileHeader->m_uiMagic != TFourCC( "TMDL" ) &&
+				 pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
+				return TFALSE;
+
+			if ( auto pTRBSkeletonHeader = m_pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( m_pTRB->GetSections(), "SkeletonHeader" ) )
+			{
+				// Copy name of the TKL file
+				m_strTKLName = pTRBSkeletonHeader->m_szTKLName;
+			}
+
+			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
+		}
+	}
+
+	// Update transform
+	m_ModelInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
+	m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
+	m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
 	
-	return TRBResourceView::OnCreate() && m_ModelInstance.pModel.IsValid();
+	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid();
 }
 
 TBOOL ModelResourceView::CanSave()
@@ -473,7 +487,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	fnPrintMessage( "Hold Right Mouse Button + Shift to rotate camera." );
 	fnPrintMessage( "Hold Right Mouse Button to move camera center." );
 	
-	if ( m_ModelInstance.pModel->pKeyLib->IsDummy() )
+	if ( m_ModelInstance.pModel->pKeyLib && m_ModelInstance.pModel->pKeyLib->IsDummy() )
 	{
 		T2String8::Format( T2String8::ms_aScratchMem, "Missing keyframe library '%s'", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
 		fnPrintErrorMessage( T2String8::ms_aScratchMem );

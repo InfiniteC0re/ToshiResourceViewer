@@ -13,7 +13,7 @@ public:
 	LocaleResourceView();
 	~LocaleResourceView();
 
-	virtual TBOOL OnCreate() OVERRIDE;
+	virtual TBOOL OnCreate( Toshi::T2StringView pchFilePath ) OVERRIDE;
 	virtual TBOOL CanSave() OVERRIDE;
 	virtual TBOOL OnSave( PTRB* pOutTRB ) OVERRIDE;
 	virtual void  OnDestroy() OVERRIDE;

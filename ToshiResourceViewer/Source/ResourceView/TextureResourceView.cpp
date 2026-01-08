@@ -22,9 +22,9 @@ TextureResourceView::~TextureResourceView()
 {
 }
 
-TBOOL TextureResourceView::OnCreate()
+TBOOL TextureResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 {
-	TRBResourceView::OnCreate();
+	TRBResourceView::OnCreate( pchFilePath );
 
 	// Create unique IDs
 	m_strTexturesId.Format( "##Textures%u", GetImGuiID() );

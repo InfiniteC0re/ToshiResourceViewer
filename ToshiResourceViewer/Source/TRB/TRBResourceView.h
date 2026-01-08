@@ -12,13 +12,14 @@ public:
 	TRBResourceView();
 	virtual ~TRBResourceView();
 
-	virtual TBOOL OnCreate();
+	virtual TBOOL OnCreate( Toshi::T2StringView pchFilePath );
 	virtual void  OnDestroy()                    = 0;
 	virtual void  OnRender( TFLOAT flDeltaTime ) = 0;
 	virtual TBOOL CanSave();
 	virtual TBOOL OnSave( PTRB* pOutTRB );
 
-	TBOOL Create( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName, const TCHAR* pchFileName );
+	TBOOL CreateTRB( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName, const TCHAR* pchFilePath, const TCHAR* pchFileName );
+	TBOOL CreateExternal( const TCHAR* pchFilePath, const TCHAR* pchFileName );
 	void  Destroy();
 
 	Toshi::T2StringView GetName() const { return m_strName.GetString(); }
@@ -33,9 +34,11 @@ public:
 protected:
 	Toshi::TString8         m_strName = "Resource View";
 	Toshi::T2FormatString64 m_strNameId;
+	Toshi::TString8         m_strFilePath;
 	Toshi::TString8         m_strFileName;
 	PTRB*                   m_pTRB;   // optional pointer to the TRB file
 	void*                   m_pData;  // optional pointer to the data of this linked symbol
 	TRBSymbol*              m_pOwner; // pointer to the registered symbol that is capable of creating this view
 	Toshi::TString8         m_strSymbolName;
+	TBOOL                   m_bIsExternal;
 };

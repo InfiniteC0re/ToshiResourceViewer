@@ -19,9 +19,9 @@ KeyLibResourceView::~KeyLibResourceView()
 	
 }
 
-TBOOL KeyLibResourceView::OnCreate()
+TBOOL KeyLibResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 {
-	TRBResourceView::OnCreate();
+	TRBResourceView::OnCreate( pchFilePath );
 
 	TKeyframeLibrary::TRBHeader* pTRBHeader = TSTATICCAST( TKeyframeLibrary::TRBHeader, m_pData );
 	

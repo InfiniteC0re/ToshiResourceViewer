@@ -9,6 +9,7 @@
 #include "ResourceTool/EngineTool.h"
 #include "Resource/StreamedTexture.h"
 #include "ResourceLoader/ModelLoader.h"
+#include "ResourceView/ModelResourceView.h"
 #include "TRB/TRBWindowManager.h"
 #include "Shader/SkinShader.h"
 
@@ -186,7 +187,8 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	ImGuiID dockspaceId = ImGui::GetID( "MainDockspace" );
 	ImGui::DockSpace( dockspaceId );
 
-	constexpr const TCHAR* FILE_FILTER = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
+	constexpr const TCHAR* TRB_FILE_FILTER = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
+	constexpr const TCHAR* GLTF_FILE_FILTER = "3D Model Files (gltf){.gltf}";
 
 	if ( ImGui::BeginMainMenuBar() )
 	{
@@ -197,7 +199,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 				IGFD::FileDialogConfig config;
 				config.path = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", FILE_FILTER, config );
+				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", TRB_FILE_FILTER, config );
 			}
 
 			ImGui::EndMenu();
@@ -205,6 +207,14 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 
 		if ( ImGui::BeginMenu( "Tools" ) )
 		{
+			if ( ImGui::MenuItem( "Create Skinned Model" ) )
+			{
+				IGFD::FileDialogConfig config;
+				config.path = ".";
+
+				ImGuiFileDialog::Instance()->OpenDialog( "ChooseGLTFFile", "Choose GLTF File", GLTF_FILE_FILTER, config );
+			}
+
 			if ( ImGui::MenuItem( "Texture Unpacker" ) )
 				TextureTool::Toggle();
 
@@ -222,7 +232,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 				config.countSelectionMax = 0;
 				config.path              = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", FILE_FILTER, config );
+				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", TRB_FILE_FILTER, config );
 			}
 
 			ImGui::EndMenu();
@@ -231,6 +241,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 		ImGui::EndMainMenuBar();
 	}
 
+	// Read TRB
 	if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFile" ) )
 	{
 		if ( ImGuiFileDialog::Instance()->IsOk() )
@@ -239,7 +250,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 			std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
 
 			TRBFileWindow* pFileWindow = new TRBFileWindow();
-			TBOOL          bLoaded     = pFileWindow->LoadFile( filePathName.c_str() );
+			TBOOL          bLoaded     = pFileWindow->LoadTRBFile( filePathName.c_str() );
 
 			if ( !bLoaded )
 			{
@@ -254,6 +265,39 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 		ImGuiFileDialog::Instance()->Close();
 	}
 
+	// Read GLTF
+	if ( ImGuiFileDialog::Instance()->Display( "ChooseGLTFFile" ) )
+	{
+		if ( ImGuiFileDialog::Instance()->IsOk() )
+		{
+			std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+			std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
+
+			TRBFileWindow* pFileWindow = new TRBFileWindow();
+			pFileWindow->LoadExternalFile( filePathName.c_str() );
+
+			// Need to create the resource view manually for now
+			ModelResourceView* pModelResView = new ModelResourceView();
+			pFileWindow->SetWindowName( TString8::VarArgs( "%s - %s", pFileWindow->GetFileName(), "Skinned Model" ).GetString() );
+			
+			if ( pFileWindow->LoadExternalResourceView( pModelResView ) )
+			{
+				// Everything seems to be fine, add the window
+				TRBWindowManager::GetSingleton()->AddWindow( pFileWindow );
+			}
+			else
+			{
+				// Something went wrong, free resources
+				delete pModelResView;
+				delete pFileWindow;
+			}
+		}
+
+		// close
+		ImGuiFileDialog::Instance()->Close();
+	}
+
+	// Batch re-export TRB
 	if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFiles" ) )
 	{
 		if ( ImGuiFileDialog::Instance()->IsOk() )

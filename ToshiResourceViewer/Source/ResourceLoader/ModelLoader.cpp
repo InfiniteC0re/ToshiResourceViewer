@@ -11,6 +11,8 @@
 #include <Platform/GL/T2Render_GL.h>
 #include <Platform/GL/T2GLTexture_GL.h>
 
+#include <tiny_gltf.h>
+
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
@@ -185,6 +187,22 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 				break;
 		}
 	}
+
+	return pModel;
+}
+
+Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath )
+{
+	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
+
+	tinygltf::Model    gltfModel;
+	tinygltf::TinyGLTF gltfLoader;
+
+	std::string strError;
+	std::string strWarning;
+
+	TBOOL bLoadedGLTF = gltfLoader.LoadASCIIFromFile( &gltfModel, &strError, &strWarning, pchFilePath.Get() );
+	TASSERT( bLoadedGLTF == TTRUE );
 
 	return pModel;
 }

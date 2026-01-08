@@ -24,9 +24,9 @@ LocaleResourceView::~LocaleResourceView()
 {
 }
 
-TBOOL LocaleResourceView::OnCreate()
+TBOOL LocaleResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 {
-	TRBResourceView::OnCreate();
+	TRBResourceView::OnCreate( pchFilePath );
 
 	T2Locale::LocaleStrings* pLocaleStrings = TSTATICCAST( T2Locale::LocaleStrings, m_pData );
 
