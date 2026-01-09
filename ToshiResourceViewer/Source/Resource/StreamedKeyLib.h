@@ -1,4 +1,6 @@
 #pragma once
+#include "Serializer/TKLBuilder.h"
+
 #include <Toshi/T2SharedPtr.h>
 #include <Render/TAnimation.h>
 
@@ -13,6 +15,7 @@ public:
 
 	void  Setup( const Toshi::TPString8& strName );
 	TBOOL Create( Toshi::TKeyframeLibrary::TRBHeader* pTRBHeader );
+	TBOOL Create( const TKLBuilder& rcTKLBuilder );
 	void  Destroy();
 
 	TBOOL IsLoaded() const { return m_pTKeyFrameLib; }
@@ -20,6 +23,15 @@ public:
 
 	const Toshi::TPString8&  GetName() const { return m_strName; }
 	Toshi::TKeyframeLibrary* GetLibrary() const { return m_pTKeyFrameLib; }
+
+	TINT GetNumTranslations() const { return m_pTRBDataCopy->m_iNumTranslations; }
+	TINT GetNumQuaternions() const { return m_pTRBDataCopy->m_iNumQuaternions; }
+	TINT GetNumScales() const { return m_pTRBDataCopy->m_iNumScales; }
+	TINT GetTranslationSize() const { return m_pTRBDataCopy->m_iTranslationSize; }
+	TINT GetQuaternionSize() const { return m_pTRBDataCopy->m_iQuaternionSize; }
+	TINT GetScaleSize() const { return m_pTRBDataCopy->m_iScaleSize; }
+
+	const Toshi::TKeyframeLibrary::TRBHeader* GetTRBHeader() const { return m_pTRBDataCopy; }
 
 private:
 	Toshi::TPString8         m_strName;
@@ -37,6 +49,7 @@ StreamedKeyLibMap::Iterator StreamedKeyLib_GetIteratorBegin();
 StreamedKeyLibMap::Iterator StreamedKeyLib_GetIteratorEnd();
 
 Toshi::T2SharedPtr<StreamedKeyLib> StreamedKeyLib_Create( const Toshi::TPString8& strName, Toshi::TKeyframeLibrary::TRBHeader* pTRBHeader );
+Toshi::T2SharedPtr<StreamedKeyLib> StreamedKeyLib_Create( const Toshi::TPString8& strName, const TKLBuilder& rcTKLBuilder );
 Toshi::T2SharedPtr<StreamedKeyLib> StreamedKeyLib_FindOrCreateDummy( const Toshi::TPString8& strName );
 
 } // namespace Resource

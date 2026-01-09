@@ -64,12 +64,6 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 				 pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
 				return TFALSE;
 
-			if ( auto pTRBSkeletonHeader = m_pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( m_pTRB->GetSections(), "SkeletonHeader" ) )
-			{
-				// Copy name of the TKL file
-				m_strTKLName = pTRBSkeletonHeader->m_szTKLName;
-			}
-
 			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
 		}
 	}
@@ -93,6 +87,57 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	const TBOOL bIsSkinnedMesh = TTRUE;
 	if ( !bIsSkinnedMesh ) return TFALSE;
 
+	{
+		// Save TKL
+		PTRB* pTKLTRB       = new PTRB( pOutTRB->GetEndianess() );
+		auto  pTKLMemStream = pTKLTRB->GetSections()->CreateStream();
+
+		auto pSrcHeader = m_ModelInstance.pModel->pKeyLib->GetTRBHeader();
+		auto pTKLHeader = pTKLMemStream->Alloc<TKeyframeLibrary::TRBHeader>();
+
+		pTKLMemStream->Alloc<TCHAR>( &pTKLHeader->m_szName, T2String8::Length( pSrcHeader->m_szName ) + 1 );
+		T2String8::Copy( pTKLHeader->m_szName, pSrcHeader->m_szName );
+		pTKLHeader->m_iNumTranslations = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumTranslations );
+		pTKLHeader->m_iNumQuaternions  = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumQuaternions );
+		pTKLHeader->m_iNumScales       = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumScales );
+		pTKLHeader->m_iTranslationSize = pTKLTRB->ConvertEndianess( pSrcHeader->m_iTranslationSize );
+		pTKLHeader->m_iQuaternionSize  = pTKLTRB->ConvertEndianess( pSrcHeader->m_iQuaternionSize );
+		pTKLHeader->m_iScaleSize       = pTKLTRB->ConvertEndianess( pSrcHeader->m_iScaleSize );
+		pTKLHeader->m_SomeVector       = TVector3( 0.0f, 0.0f, 0.0f );
+
+		pTKLMemStream->Alloc<TAnimVector>( &pTKLHeader->m_pTranslations, pSrcHeader->m_iNumTranslations );
+		pTKLMemStream->Alloc<TAnimQuaternion>( &pTKLHeader->m_pQuaternions, pSrcHeader->m_iNumQuaternions );
+		pTKLMemStream->Alloc<TAnimScale>( &pTKLHeader->m_pScales, pSrcHeader->m_iNumScales );
+		
+		for ( TINT i = 0; i < pSrcHeader->m_iNumTranslations; i++ )
+		{
+			pTKLHeader->m_pTranslations[ i ] = TVector3(
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].x ),
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].y ),
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].z )
+			);
+		}
+
+		for ( TINT i = 0; i < pSrcHeader->m_iNumQuaternions; i++ )
+		{
+			pTKLHeader->m_pQuaternions[ i ] = TQuaternion(
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].x ),
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].y ),
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].z ),
+			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].w )
+			);
+		}
+
+		for ( TINT i = 0; i < pSrcHeader->m_iNumScales; i++ )
+		{
+			pTKLHeader->m_pScales[ i ] = pTKLTRB->ConvertEndianess( pSrcHeader->m_pScales[ i ] );
+		}
+
+		pTKLTRB->GetSymbols()->Add( pTKLMemStream, "keylib", pTKLHeader.get() );
+
+		pTKLTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pSrcHeader->m_szName ).GetString(), TFALSE );
+	}
+
 	PTRBSections* pSECT = pOutTRB->GetSections();
 	PTRBSymbols* pSYMB = pOutTRB->GetSymbols();
 
@@ -109,7 +154,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 
 	// Allocate SkeletonHeader symbol
 	auto pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
-	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, m_strTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
+	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, m_ModelInstance.pModel->oSkeletonHeader.m_szTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
 	pTRBSkeletonHeader->m_iTKeyCount = pOutTRB->ConvertEndianess( 0 );
 	pTRBSkeletonHeader->m_iQKeyCount = pOutTRB->ConvertEndianess( 0 );
 	pTRBSkeletonHeader->m_iSKeyCount = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
@@ -148,10 +193,10 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 		pTRBSeq->m_iNameLength = pOutTRB->ConvertEndianess( pSeq->m_iNameLength );
 		T2String8::Copy( pTRBSeq->m_szName, pSeq->m_szName, sizeof( pTRBSeq->m_szName ) - 1 );
 		
-		pTRBSeq->m_eFlags = pOutTRB->ConvertEndianess( pSeq->m_eFlags );
-		pTRBSeq->m_iUnk2 = pOutTRB->ConvertEndianess( pSeq->m_iUnk2 );
+		pTRBSeq->m_eFlags        = pOutTRB->ConvertEndianess( pSeq->m_eFlags );
+		pTRBSeq->m_eMode         = pOutTRB->ConvertEndianess( pSeq->m_eMode );
 		pTRBSeq->m_iNumUsedBones = pOutTRB->ConvertEndianess( pSeq->m_iNumUsedBones );
-		pTRBSeq->m_fDuration = pOutTRB->ConvertEndianess( pSeq->m_fDuration );
+		pTRBSeq->m_fDuration     = pOutTRB->ConvertEndianess( pSeq->m_fDuration );
 
 		// Now, copy all animated bones of this sequence
 		auto pTRBSeqBones = pMemStream->Alloc<TSkeletonSequenceBone>( &pTRBSeq->m_pSeqBones, iNumBones );
@@ -305,7 +350,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		{
 			TSkeleton* pSkeleton = m_ModelInstance.pModel->pSkeleton;
 
-			if ( pSkeleton )
+			if ( pSkeleton && pSkeleton->m_SkeletonSequences )
 			{
 				TSkeletonSequence* pSequences = pSkeleton->m_SkeletonSequences;
 
@@ -495,7 +540,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 	T2_FOREACH( m_ModelInstance.pModel->vecUsedTextures, it )
 	{
-		if ( it->Get()->IsDummy() )
+		if ( it->Get() && it->Get()->IsDummy() )
 		{
 			T2String8::Format( T2String8::ms_aScratchMem, "Missing texture '%s'", it->Get()->GetTexture().strName.GetString() );
 			fnPrintErrorMessage( T2String8::ms_aScratchMem );
@@ -514,9 +559,9 @@ void ModelResourceView::ExportScene()
 	tinygltf::Node gltfRootNode;
 	gltfRootNode.name = m_strFileName.GetString();
 	
-	TQuaternion quatRotation;
-	quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
-	gltfRootNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
+	//TQuaternion quatRotation;
+	//quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
+	//gltfRootNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
 
 	//-----------------------------------------------------------------------------
 	// 1. Skeleton

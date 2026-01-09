@@ -11,6 +11,8 @@
 #include <Platform/GL/T2GLTexture_GL.h>
 #include <Platform/GL/T2RenderBuffer_GL.h>
 
+#define SKINNED_SUBMESH_MAX_BONES 28
+
 class SkinMesh : public Mesh
 {
 public:
@@ -24,7 +26,7 @@ public:
 		TUINT32               uiNumUsedVertices;
 		TUINT32               uiNumIndices;
 		TUINT32               uiNumBones;
-		TINT                  aBones[ 28 ];
+		TINT                  aBones[ SKINNED_SUBMESH_MAX_BONES ];
 	};
 
 	struct SkinVertex

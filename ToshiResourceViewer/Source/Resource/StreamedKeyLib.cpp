@@ -64,6 +64,36 @@ TBOOL StreamedKeyLib::Create( TKeyframeLibrary::TRBHeader* pTRBHeader )
 	return m_pTKeyFrameLib != TNULL;
 }
 
+TBOOL StreamedKeyLib::Create( const TKLBuilder& rcTKLBuilder )
+{
+	// Create a copy of the data
+	m_pTRBDataCopy = new TKeyframeLibrary::TRBHeader();
+
+	m_pTRBDataCopy->m_szName = new TCHAR[ T2String8::Length( rcTKLBuilder.GetName() ) + 1 ];
+	T2String8::Copy( m_pTRBDataCopy->m_szName, rcTKLBuilder.GetName() );
+
+	m_pTRBDataCopy->m_SomeVector       = TVector3( 0.0f, 0.0f, 0.0f );   // unused in Barnyard
+	m_pTRBDataCopy->m_iNumTranslations = rcTKLBuilder.GetTranslations().Size();
+	m_pTRBDataCopy->m_iNumQuaternions  = rcTKLBuilder.GetRotations().Size();
+	m_pTRBDataCopy->m_iNumScales       = rcTKLBuilder.GetScales().Size();
+	m_pTRBDataCopy->m_iTranslationSize = sizeof( TAnimVector );
+	m_pTRBDataCopy->m_iQuaternionSize  = sizeof( TAnimQuaternion );
+	m_pTRBDataCopy->m_iScaleSize       = sizeof( TAnimScale );
+
+	m_pTRBDataCopy->m_pTranslations = new TAnimVector[ m_pTRBDataCopy->m_iNumTranslations ];
+	if ( m_pTRBDataCopy->m_iNumTranslations > 0 ) TUtil::MemCopy( m_pTRBDataCopy->m_pTranslations, &rcTKLBuilder.GetTranslations()[ 0 ], sizeof( TAnimVector ) * m_pTRBDataCopy->m_iNumTranslations );
+
+	m_pTRBDataCopy->m_pQuaternions = new TAnimQuaternion[ m_pTRBDataCopy->m_iNumQuaternions ];
+	if ( m_pTRBDataCopy->m_iNumQuaternions > 0 ) TUtil::MemCopy( m_pTRBDataCopy->m_pQuaternions, &rcTKLBuilder.GetRotations()[ 0 ], sizeof( TAnimQuaternion ) * m_pTRBDataCopy->m_iNumQuaternions );
+
+	m_pTRBDataCopy->m_pScales = new TAnimScale[ m_pTRBDataCopy->m_iNumScales ];
+	if ( m_pTRBDataCopy->m_iNumScales > 0) TUtil::MemCopy( m_pTRBDataCopy->m_pScales, &rcTKLBuilder.GetScales()[ 0 ], sizeof( TAnimScale ) * m_pTRBDataCopy->m_iNumScales );
+
+	m_pTKeyFrameLib = g_pKeyFrameLibManager->LoadLibrary( m_pTRBDataCopy );
+
+	return m_pTKeyFrameLib != TNULL;
+}
+
 void StreamedKeyLib::Destroy()
 {
 	if ( m_pTKeyFrameLib )
@@ -148,6 +178,39 @@ T2SharedPtr<Resource::StreamedKeyLib> StreamedKeyLib_Create( const TPString8& st
 
 	pKeyLib->Setup( strName );
 	pKeyLib->Create( pTRBHeader );
+
+	g_mapStreamedKeyLibs.Insert( strName, T2WeakPtr<Resource::StreamedKeyLib>( pKeyLib ) );
+
+	return pKeyLib;
+}
+
+Toshi::T2SharedPtr<Resource::StreamedKeyLib> StreamedKeyLib_Create( const Toshi::TPString8& strName, const TKLBuilder& rcTKLBuilder )
+{
+	// See if the keyframe lib is already created
+	auto it = g_mapStreamedKeyLibs.Find( strName );
+
+	if ( it != g_mapStreamedKeyLibs.End() )
+	{
+		if ( !it->second.IsValid() )
+			Resource::StreamedKeyLib_DestroyUnused();
+		else
+		{
+			if ( it->second->IsDummy() )
+			{
+				// Complete the keyframe lib with real data
+				it->second->Setup( strName );
+				it->second->Create( rcTKLBuilder );
+			}
+
+			return it->second;
+		}
+	}
+
+	// Create new real keyframe lib
+	auto pKeyLib = T2SharedPtr<Resource::StreamedKeyLib>::New();
+
+	pKeyLib->Setup( strName );
+	pKeyLib->Create( rcTKLBuilder );
 
 	g_mapStreamedKeyLibs.Insert( strName, T2WeakPtr<Resource::StreamedKeyLib>( pKeyLib ) );
 

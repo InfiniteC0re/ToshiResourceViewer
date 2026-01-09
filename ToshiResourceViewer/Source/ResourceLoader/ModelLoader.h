@@ -26,7 +26,7 @@ public:
 	Toshi::TTMDBase::SkeletonHeader              oSkeletonHeader;
 	Toshi::TSkeleton*                            pSkeleton;
 	Toshi::T2SharedPtr<Resource::StreamedKeyLib> pKeyLib;
-	TBOOL                                        bAnimationsReady;
+	TBOOL                                        bAnimationsLoaded;
 
 	TINT             iLODCount;
 	Toshi::TModelLOD aLODs[ 5 ];
