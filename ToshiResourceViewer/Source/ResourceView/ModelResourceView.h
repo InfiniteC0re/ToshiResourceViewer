@@ -25,7 +25,8 @@ public:
 	void SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
 	void ExportScene( Toshi::T2StringView pchOutFileName );
 
-	TBOOL TryFixingMissingTKL();
+	Toshi::TPString8 GetTKLName();
+	TBOOL            TryFixingMissingTKL();
 
 private:
 	Toshi::T2FormatString64       m_strAnimationsId;

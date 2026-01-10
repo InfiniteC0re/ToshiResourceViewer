@@ -815,12 +815,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 					mapUsedBones.Insert( iBoneIndex4, mapUsedBones.Size() );
 				}
 
+				TBOOL bNoBoneAnimated = !bBoneAnimated1 && !bBoneAnimated2 && !bBoneAnimated3 && !bBoneAnimated4;
+
 				vecVertices[ j ].Bones[ 0 ] = bBoneAnimated1 ? ( mapUsedBones[ iBoneIndex1 ]->second * 3 ) : 0;
 				vecVertices[ j ].Bones[ 1 ] = bBoneAnimated2 ? ( mapUsedBones[ iBoneIndex2 ]->second * 3 ) : 0;
 				vecVertices[ j ].Bones[ 2 ] = bBoneAnimated3 ? ( mapUsedBones[ iBoneIndex3 ]->second * 3 ) : 0;
 				vecVertices[ j ].Bones[ 3 ] = bBoneAnimated4 ? ( mapUsedBones[ iBoneIndex4 ]->second * 3 ) : 0;
 
-				vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? TUINT8( flWeight1 * 255.0f ) : 0;
+				vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? TUINT8( flWeight1 * 255.0f ) : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
 				vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? TUINT8( flWeight2 * 255.0f ) : 0;
 				vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? TUINT8( flWeight3 * 255.0f ) : 0;
 				vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? TUINT8( flWeight4 * 255.0f ) : 0;
@@ -858,7 +860,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			pSubMesh->uiNumIndices      = uiNumIndices;
 			pSubMesh->oIndexBuffer      = T2Render::CreateIndexBuffer( pIndices, uiNumIndices, GL_STATIC_DRAW );
 			pSubMesh->uiEndVertexId     = uiStartVertex + uiNumVerticesOrig;
-			pSubMesh->uiNumBones        = mapUsedBones.Size();
+			pSubMesh->uiNumBones        = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size(); // prevent meshes that don't use bones from disappearing
 
 			// Clean NvTriStrip's object
 			if ( pPrims )

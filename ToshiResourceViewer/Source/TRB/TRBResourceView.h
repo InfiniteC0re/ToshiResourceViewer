@@ -18,12 +18,15 @@ public:
 	virtual TBOOL CanSave();
 	virtual TBOOL OnSave( PTRB* pOutTRB );
 
-	TBOOL CreateTRB( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName, const TCHAR* pchFilePath, const TCHAR* pchFileName );
-	TBOOL CreateExternal( const TCHAR* pchFilePath, const TCHAR* pchFileName );
+	TBOOL CreateTRB( PTRB* pTRB, void* pData, const TCHAR* pchSymbolName, const TCHAR* pchFilePath );
+	TBOOL CreateExternal( const TCHAR* pchFilePath );
 	void  Destroy();
 
 	Toshi::T2StringView GetName() const { return m_strName.GetString(); }
 	Toshi::T2StringView GetNameId() const { return m_strNameId.Get(); }
+
+	const Toshi::TString8& GetFilePath() const { return m_strFilePath; }
+	const Toshi::TString8& GetFileName() const { return m_strFileName; }
 
 	template <typename T>
 	T ConvertEndianess( T a_numValue )

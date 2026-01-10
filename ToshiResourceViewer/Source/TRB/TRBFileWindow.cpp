@@ -83,10 +83,8 @@ TBOOL TRBFileWindow::LoadTRBFile( Toshi::T2StringView strFilePath )
 			if ( !pResourceView )
 				continue;
 
-			TString8 strFileNameNoExt = m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) );
-
 			// Initialise resource view from the data stored within TRB
-			if ( !pResourceView->CreateTRB( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get(), pSymbols->GetName( i ), strFilePath, strFileNameNoExt ) )
+			if ( !pResourceView->CreateTRB( m_pFile, pSymbols->Get<void*>( *pSections, 0 ).get(), pSymbols->GetName( i ), strFilePath ) )
 			{
 				pResourceView->Destroy();
 				continue;
@@ -142,7 +140,7 @@ TBOOL TRBFileWindow::LoadExternalResourceView( TRBResourceView* pResourceView )
 {
 	if ( !pResourceView ) return TFALSE;
 
-	TBOOL bResult = pResourceView->CreateExternal( m_strFilePath.GetString(), m_strFileName.GetString() );
+	TBOOL bResult = pResourceView->CreateExternal( m_strFilePath.GetString() );
 	if ( !bResult ) return TFALSE;
 	
 	m_vecResourceViews.PushBack( pResourceView );

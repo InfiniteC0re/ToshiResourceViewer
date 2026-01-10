@@ -401,6 +401,8 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		{
 			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel ) )
 			{
+				m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
+				
 				if ( m_iSelectedSequence != -1 && !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
 					m_ModelInstance.pSkeletonInstance->AddAnimationFull( m_iSelectedSequence, 1.0f, 0.0f, 0.0f, TAnimation::Flags_Managed );
 
@@ -671,176 +673,179 @@ void ModelResourceView::ExportScene( Toshi::T2StringView pchOutFileName )
 		// 1.2. Sequences
 		//-----------------------------------------------------------------------------
 
-		// Create buffer for keyframes and animation data
-		tinygltf::Buffer gltfAnimationTimeBuffer;
-		tinygltf::Buffer gltfAnimationQuatBuffer;
-		tinygltf::Buffer gltfAnimationTranBuffer;
-
-		// Create buffer views
-		tinygltf::BufferView gltfAnimationTimeBufferView;
-		gltfAnimationTimeBufferView.buffer = gltfModel.buffers.size() + 0;
-
-		tinygltf::BufferView gltfAnimationQuatBufferView;
-		gltfAnimationQuatBufferView.buffer = gltfModel.buffers.size() + 1;
-
-		tinygltf::BufferView gltfAnimationTranBufferView;
-		gltfAnimationTranBufferView.buffer = gltfModel.buffers.size() + 2;
-
-		const TINT nAnimTimeBufferViewIdx = TINT( gltfModel.bufferViews.size() + 0 );
-		const TINT nAnimQuatBufferViewIdx = TINT( gltfModel.bufferViews.size() + 1 );
-		const TINT nAnimTranBufferViewIdx = TINT( gltfModel.bufferViews.size() + 2 );
-
-		for ( TINT i = 0; i < pSkeleton->GetSequenceCount(); i++ )
+		if ( pSkeleton->GetSequenceCount() > 0 )
 		{
-			TSkeletonSequence* pSeq = pSkeleton->GetSequence( i );
-			TSkeletonSequenceBone* pSeqBones = pSeq->GetBones();
+			// Create buffer for keyframes and animation data
+			tinygltf::Buffer gltfAnimationTimeBuffer;
+			tinygltf::Buffer gltfAnimationQuatBuffer;
+			tinygltf::Buffer gltfAnimationTranBuffer;
 
-			tinygltf::Animation gltfAnimation;
-			gltfAnimation.name = pSeq->GetName();
-			
-			const TINT iNumAutoBones = pSkeleton->GetAutoBoneCount();
-			for ( TINT k = 0; k < iNumAutoBones; k++ )
+			// Create buffer views
+			tinygltf::BufferView gltfAnimationTimeBufferView;
+			gltfAnimationTimeBufferView.buffer = gltfModel.buffers.size() + 0;
+
+			tinygltf::BufferView gltfAnimationQuatBufferView;
+			gltfAnimationQuatBufferView.buffer = gltfModel.buffers.size() + 1;
+
+			tinygltf::BufferView gltfAnimationTranBufferView;
+			gltfAnimationTranBufferView.buffer = gltfModel.buffers.size() + 2;
+
+			const TINT nAnimTimeBufferViewIdx = TINT( gltfModel.bufferViews.size() + 0 );
+			const TINT nAnimQuatBufferViewIdx = TINT( gltfModel.bufferViews.size() + 1 );
+			const TINT nAnimTranBufferViewIdx = TINT( gltfModel.bufferViews.size() + 2 );
+
+			for ( TINT i = 0; i < pSkeleton->GetSequenceCount(); i++ )
 			{
-				TSkeletonSequenceBone* pSeqBone = &pSeqBones[ k ];
-				const TINT iNumKeys = pSeqBone->GetKeyCount();
-				
-				// Skip bones without any keyframes
-				if ( iNumKeys <= 0 ) continue;
+				TSkeletonSequence*     pSeq      = pSkeleton->GetSequence( i );
+				TSkeletonSequenceBone* pSeqBones = pSeq->GetBones();
 
-				const TBOOL bTranslationAnimated = pSeqBone->IsTranslateAnimated();
+				tinygltf::Animation gltfAnimation;
+				gltfAnimation.name = pSeq->GetName();
 
-				const TINT iTimeBufferOffset = TINT( gltfAnimationTimeBuffer.data.size() );
-				const TINT iQuatBufferOffset = TINT( gltfAnimationQuatBuffer.data.size() );
-				const TINT iTranBufferOffset = TINT( gltfAnimationTranBuffer.data.size() );
-
-				TFLOAT flBoneMaxKeyTime = 0.0f;
-
-				// Write animation data to the buffer
-				TINT iNumRealKeys = 0;
-				for ( TINT j = 0; j < iNumKeys; j++ )
+				const TINT iNumAutoBones = pSkeleton->GetAutoBoneCount();
+				for ( TINT k = 0; k < iNumAutoBones; k++ )
 				{
-					TUINT16* pKeyData = pSeqBone->GetKey( j );
+					TSkeletonSequenceBone* pSeqBone = &pSeqBones[ k ];
+					const TINT             iNumKeys = pSeqBone->GetKeyCount();
 
-					// For some reason Barnyard models can have multiple keys happening at the same time
-					// We will use only the last one, since otherwise it would cause errors
-					if ( j + 1 < iNumKeys && *pKeyData == *pSeqBone->GetKey( j + 1 ) ) continue;
-					iNumRealKeys += 1;
+					// Skip bones without any keyframes
+					if ( iNumKeys <= 0 ) continue;
 
-					// Write key time
-					TFLOAT flKeyTime = ( *pKeyData / 65535.0f ) * pSeq->GetDuration();
-					gltfAnimationTimeBuffer.data.insert(
-						gltfAnimationTimeBuffer.data.end(),
-						TREINTERPRETCAST( const TBYTE*, &flKeyTime ),
-						TREINTERPRETCAST( const TBYTE*, &flKeyTime + 1 )
-					);
+					const TBOOL bTranslationAnimated = pSeqBone->IsTranslateAnimated();
 
-					flBoneMaxKeyTime = TMath::Max( flBoneMaxKeyTime, flKeyTime );
+					const TINT iTimeBufferOffset = TINT( gltfAnimationTimeBuffer.data.size() );
+					const TINT iQuatBufferOffset = TINT( gltfAnimationQuatBuffer.data.size() );
+					const TINT iTranBufferOffset = TINT( gltfAnimationTranBuffer.data.size() );
 
-					// Write quaternion and position
-					const TAnimQuaternion* pQuaternion = pSkeleton->GetKeyLibraryInstance().GetQ( pKeyData[ 1 ] );
-					const TAnimVector* pPosition = &TVector3::VEC_ZERO;
-					
+					TFLOAT flBoneMaxKeyTime = 0.0f;
+
+					// Write animation data to the buffer
+					TINT iNumRealKeys = 0;
+					for ( TINT j = 0; j < iNumKeys; j++ )
+					{
+						TUINT16* pKeyData = pSeqBone->GetKey( j );
+
+						// For some reason Barnyard models can have multiple keys happening at the same time
+						// We will use only the last one, since otherwise it would cause errors
+						if ( j + 1 < iNumKeys && *pKeyData == *pSeqBone->GetKey( j + 1 ) ) continue;
+						iNumRealKeys += 1;
+
+						// Write key time
+						TFLOAT flKeyTime = ( *pKeyData / 65535.0f ) * pSeq->GetDuration();
+						gltfAnimationTimeBuffer.data.insert(
+						    gltfAnimationTimeBuffer.data.end(),
+						    TREINTERPRETCAST( const TBYTE*, &flKeyTime ),
+						    TREINTERPRETCAST( const TBYTE*, &flKeyTime + 1 )
+						);
+
+						flBoneMaxKeyTime = TMath::Max( flBoneMaxKeyTime, flKeyTime );
+
+						// Write quaternion and position
+						const TAnimQuaternion* pQuaternion = pSkeleton->GetKeyLibraryInstance().GetQ( pKeyData[ 1 ] );
+						const TAnimVector*     pPosition   = &TVector3::VEC_ZERO;
+
+						if ( bTranslationAnimated )
+							pPosition = pSkeleton->GetKeyLibraryInstance().GetT( pKeyData[ 2 ] );
+
+						gltfAnimationQuatBuffer.data.insert(
+						    gltfAnimationQuatBuffer.data.end(),
+						    TREINTERPRETCAST( const TBYTE*, pQuaternion ),
+						    TREINTERPRETCAST( const TBYTE*, pQuaternion + 1 )
+						);
+
+						gltfAnimationTranBuffer.data.insert(
+						    gltfAnimationTranBuffer.data.end(),
+						    TREINTERPRETCAST( const TBYTE*, pPosition ),
+						    TREINTERPRETCAST( const TBYTE*, pPosition + 1 )
+						);
+					}
+
+					// Should never happen, but let's make sure...
+					if ( iNumRealKeys == 0 ) continue;
+
+					// Create animation channels
+					TINT iBoneGLTF = mapEngineBoneToGLTF[ k ]->second;
+
+					tinygltf::Accessor gltfTimeAccessor;
+					gltfTimeAccessor.bufferView    = nAnimTimeBufferViewIdx;
+					gltfTimeAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+					gltfTimeAccessor.type          = TINYGLTF_TYPE_SCALAR;
+					gltfTimeAccessor.count         = iNumRealKeys;
+					gltfTimeAccessor.byteOffset    = iTimeBufferOffset;
+					gltfTimeAccessor.minValues     = { 0.0f };
+					gltfTimeAccessor.maxValues     = { flBoneMaxKeyTime };
+
+					gltfModel.accessors.push_back( std::move( gltfTimeAccessor ) );
+					const TINT iAccTimeIndex = TINT( gltfModel.accessors.size() - 1 );
+
+					tinygltf::Accessor gltfQuatAccessor;
+					gltfQuatAccessor.bufferView    = nAnimQuatBufferViewIdx;
+					gltfQuatAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+					gltfQuatAccessor.type          = TINYGLTF_TYPE_VEC4;
+					gltfQuatAccessor.count         = iNumRealKeys;
+					gltfQuatAccessor.byteOffset    = iQuatBufferOffset;
+
+					gltfModel.accessors.push_back( std::move( gltfQuatAccessor ) );
+					const TINT iAccQuatIndex = TINT( gltfModel.accessors.size() - 1 );
+
+					tinygltf::AnimationSampler gltfAnimationSamplerQuat;
+					gltfAnimationSamplerQuat.input  = iAccTimeIndex;
+					gltfAnimationSamplerQuat.output = iAccQuatIndex;
+
+					gltfAnimation.samplers.push_back( std::move( gltfAnimationSamplerQuat ) );
+					const TINT iSamplerQuatIndex = TINT( gltfAnimation.samplers.size() - 1 );
+
+					tinygltf::AnimationChannel gltfAnimChanQuat;
+					gltfAnimChanQuat.target_node = iBoneGLTF;
+					gltfAnimChanQuat.target_path = "rotation";
+					gltfAnimChanQuat.sampler     = iSamplerQuatIndex;
+
+					gltfAnimation.channels.push_back( std::move( gltfAnimChanQuat ) );
+
 					if ( bTranslationAnimated )
-						pPosition = pSkeleton->GetKeyLibraryInstance().GetT( pKeyData[ 2 ] );
+					{
+						tinygltf::Accessor gltfPosAccessor;
+						gltfPosAccessor.bufferView    = nAnimTranBufferViewIdx;
+						gltfPosAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+						gltfPosAccessor.type          = TINYGLTF_TYPE_VEC3;
+						gltfPosAccessor.count         = iNumRealKeys;
+						gltfPosAccessor.byteOffset    = iTranBufferOffset;
 
-					gltfAnimationQuatBuffer.data.insert(
-						gltfAnimationQuatBuffer.data.end(),
-						TREINTERPRETCAST( const TBYTE*, pQuaternion ),
-						TREINTERPRETCAST( const TBYTE*, pQuaternion + 1 )
-					);
+						gltfModel.accessors.push_back( std::move( gltfPosAccessor ) );
+						const TINT iAccPosIndex = TINT( gltfModel.accessors.size() - 1 );
 
-					gltfAnimationTranBuffer.data.insert(
-						gltfAnimationTranBuffer.data.end(),
-						TREINTERPRETCAST( const TBYTE*, pPosition ),
-						TREINTERPRETCAST( const TBYTE*, pPosition + 1 )
-					);
+						tinygltf::AnimationSampler gltfAnimationSamplerPos;
+						gltfAnimationSamplerPos.input  = iAccTimeIndex;
+						gltfAnimationSamplerPos.output = iAccPosIndex;
+
+						gltfAnimation.samplers.push_back( std::move( gltfAnimationSamplerPos ) );
+						const TINT iSamplerPosIndex = TINT( gltfAnimation.samplers.size() - 1 );
+
+						tinygltf::AnimationChannel gltfAnimChanPos;
+						gltfAnimChanPos.target_node = iBoneGLTF;
+						gltfAnimChanPos.target_path = "translation";
+						gltfAnimChanPos.sampler     = iSamplerPosIndex;
+
+						gltfAnimation.channels.push_back( std::move( gltfAnimChanPos ) );
+					}
 				}
 
-				// Should never happen, but let's make sure...
-				if ( iNumRealKeys == 0 ) continue;
-
-				// Create animation channels
-				TINT iBoneGLTF = mapEngineBoneToGLTF[ k ]->second;
-
-				tinygltf::Accessor gltfTimeAccessor;
-				gltfTimeAccessor.bufferView = nAnimTimeBufferViewIdx;
-				gltfTimeAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-				gltfTimeAccessor.type = TINYGLTF_TYPE_SCALAR;
-				gltfTimeAccessor.count = iNumRealKeys;
-				gltfTimeAccessor.byteOffset = iTimeBufferOffset;
-				gltfTimeAccessor.minValues = { 0.0f };
-				gltfTimeAccessor.maxValues = { flBoneMaxKeyTime };
-
-				gltfModel.accessors.push_back( std::move( gltfTimeAccessor ) );
-				const TINT iAccTimeIndex = TINT( gltfModel.accessors.size() - 1 );
-
-				tinygltf::Accessor gltfQuatAccessor;
-				gltfQuatAccessor.bufferView = nAnimQuatBufferViewIdx;
-				gltfQuatAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-				gltfQuatAccessor.type = TINYGLTF_TYPE_VEC4;
-				gltfQuatAccessor.count = iNumRealKeys;
-				gltfQuatAccessor.byteOffset = iQuatBufferOffset;
-
-				gltfModel.accessors.push_back( std::move( gltfQuatAccessor ) );
-				const TINT iAccQuatIndex = TINT( gltfModel.accessors.size() - 1 );
-
-				tinygltf::AnimationSampler gltfAnimationSamplerQuat;
-				gltfAnimationSamplerQuat.input = iAccTimeIndex;
-				gltfAnimationSamplerQuat.output = iAccQuatIndex;
-
-				gltfAnimation.samplers.push_back( std::move( gltfAnimationSamplerQuat ) );
-				const TINT iSamplerQuatIndex = TINT( gltfAnimation.samplers.size() - 1 );
-
-				tinygltf::AnimationChannel gltfAnimChanQuat;
-				gltfAnimChanQuat.target_node = iBoneGLTF;
-				gltfAnimChanQuat.target_path = "rotation";
-				gltfAnimChanQuat.sampler = iSamplerQuatIndex;
-
-				gltfAnimation.channels.push_back( std::move( gltfAnimChanQuat ) );
-
-				if ( bTranslationAnimated )
-				{
-					tinygltf::Accessor gltfPosAccessor;
-					gltfPosAccessor.bufferView = nAnimTranBufferViewIdx;
-					gltfPosAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-					gltfPosAccessor.type = TINYGLTF_TYPE_VEC3;
-					gltfPosAccessor.count = iNumRealKeys;
-					gltfPosAccessor.byteOffset = iTranBufferOffset;
-
-					gltfModel.accessors.push_back( std::move( gltfPosAccessor ) );
-					const TINT iAccPosIndex = TINT( gltfModel.accessors.size() - 1 );
-
-					tinygltf::AnimationSampler gltfAnimationSamplerPos;
-					gltfAnimationSamplerPos.input = iAccTimeIndex;
-					gltfAnimationSamplerPos.output = iAccPosIndex;
-
-					gltfAnimation.samplers.push_back( std::move( gltfAnimationSamplerPos ) );
-					const TINT iSamplerPosIndex = TINT( gltfAnimation.samplers.size() - 1 );
-
-					tinygltf::AnimationChannel gltfAnimChanPos;
-					gltfAnimChanPos.target_node = iBoneGLTF;
-					gltfAnimChanPos.target_path = "translation";
-					gltfAnimChanPos.sampler = iSamplerPosIndex;
-
-					gltfAnimation.channels.push_back( std::move( gltfAnimChanPos ) );
-				}
+				gltfModel.animations.push_back( std::move( gltfAnimation ) );
 			}
 
-			gltfModel.animations.push_back( std::move( gltfAnimation ) );
+			// Submit buffers...
+			gltfAnimationTimeBufferView.byteLength = gltfAnimationTimeBuffer.data.size();
+			gltfAnimationQuatBufferView.byteLength = gltfAnimationQuatBuffer.data.size();
+			gltfAnimationTranBufferView.byteLength = gltfAnimationTranBuffer.data.size();
+
+			gltfModel.buffers.push_back( std::move( gltfAnimationTimeBuffer ) );
+			gltfModel.buffers.push_back( std::move( gltfAnimationQuatBuffer ) );
+			gltfModel.buffers.push_back( std::move( gltfAnimationTranBuffer ) );
+
+			gltfModel.bufferViews.push_back( std::move( gltfAnimationTimeBufferView ) );
+			gltfModel.bufferViews.push_back( std::move( gltfAnimationQuatBufferView ) );
+			gltfModel.bufferViews.push_back( std::move( gltfAnimationTranBufferView ) );
 		}
-
-		// Submit buffers...
-		gltfAnimationTimeBufferView.byteLength = gltfAnimationTimeBuffer.data.size();
-		gltfAnimationQuatBufferView.byteLength = gltfAnimationQuatBuffer.data.size();
-		gltfAnimationTranBufferView.byteLength = gltfAnimationTranBuffer.data.size();
-
-		gltfModel.buffers.push_back( std::move( gltfAnimationTimeBuffer ) );
-		gltfModel.buffers.push_back( std::move( gltfAnimationQuatBuffer ) );
-		gltfModel.buffers.push_back( std::move( gltfAnimationTranBuffer ) );
-
-		gltfModel.bufferViews.push_back( std::move( gltfAnimationTimeBufferView ) );
-		gltfModel.bufferViews.push_back( std::move( gltfAnimationQuatBufferView ) );
-		gltfModel.bufferViews.push_back( std::move( gltfAnimationTranBufferView ) );
 	}
 
 	//-----------------------------------------------------------------------------
@@ -922,4 +927,14 @@ TBOOL ModelResourceView::TryFixingMissingTKL()
 	}
 
 	return TTRUE;
+}
+
+Toshi::TPString8 ModelResourceView::GetTKLName()
+{
+	if ( m_ModelInstance.pModel->pKeyLib && !m_ModelInstance.pModel->pKeyLib->IsDummy() )
+	{
+		return m_ModelInstance.pModel->pKeyLib->GetName();
+	}
+
+	return TPS8D( "Unknown" );
 }
