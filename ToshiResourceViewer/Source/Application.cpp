@@ -12,6 +12,7 @@
 #include "ResourceView/ModelResourceView.h"
 #include "TRB/TRBWindowManager.h"
 #include "Shader/SkinShader.h"
+#include "AppHeadless.h"
 
 #include <Toshi/Toshi.h>
 #include <ToshiTools/T2CommandLine.h>
@@ -23,6 +24,8 @@
 #include <Core/TMemoryDebugOn.h>
 
 TOSHI_NAMESPACE_USING
+
+TBOOL g_bHeadless = TTRUE;
 
 static struct MemoryInitialiser
 {
@@ -36,6 +39,8 @@ Application g_oTheApp;
 
 TBOOL Application::OnEvent( const SDL_Event& event )
 {
+	if ( g_bHeadless ) return TTRUE;
+
 	ImGui_ImplSDL2_ProcessEvent( &event );
 
 	if ( event.type == SDL_QUIT )
@@ -48,11 +53,14 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 {
 	TApplication::OnCreate( argc, argv );
 
+	g_bHeadless = g_pCmd->HasParameter( "-headless" );
+
 	T2Render::WindowParams windowParams;
 	windowParams.pchTitle    = "Toshi Resource Viewer";
 	windowParams.uiWidth     = 800;
 	windowParams.uiHeight    = 600;
 	windowParams.bIsWindowed = TTRUE;
+	windowParams.bIsHeadless = g_bHeadless;
 
 	T2Render* pRender        = T2Render::CreateSingleton();
 	TBOOL     bWindowCreated = pRender->Create( windowParams );
@@ -65,7 +73,18 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 1 );
 	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 16 );
 
+	TOrderTable::CreateStaticData( 2000, 4000 );
+	SkinShader::CreateSingleton()->Create();
+
 	TRBWindowManager::CreateSingleton();
+
+	if ( g_bHeadless )
+	{
+		HeadlessMain( argc, argv );
+		g_oTheApp.Destroy();
+
+		return TTRUE;
+	}
 
 	// Initialise ImGui
 	IMGUI_CHECKVERSION();
@@ -148,9 +167,6 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	ImGui_ImplSDL2_InitForOpenGL( pWindow->GetNativeWindow(), pRender->GetGLContext() );
 	ImGui_ImplOpenGL3_Init( "#version 130" );
 
-	TOrderTable::CreateStaticData( 2000, 4000 );
-	SkinShader::CreateSingleton()->Create();
-
 	return bWindowCreated;
 }
 
@@ -162,180 +178,180 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	// Update window to get new events
 	pRender->Update( flDeltaTime );
 
-	// Render to the window
-	pRender->BeginScene();
-
-	// Start the Dear ImGui frame
-	ImGui_ImplOpenGL3_NewFrame();
-	ImGui_ImplSDL2_NewFrame();
-	ImGui::NewFrame();
-
-	// Create main dock space
-	ImGuiViewport* imViewport = ImGui::GetMainViewport();
-	ImGui::SetNextWindowPos( imViewport->Pos );
-	ImGui::SetNextWindowSize( imViewport->Size );
-	ImGui::SetNextWindowViewport( imViewport->ID );
-
-	ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_MenuBar;
-	window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-	window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-
-	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
-	ImGui::Begin( "DockSpace", TNULL, window_flags );
-	ImGui::PopStyleVar();
-
-	ImGuiID dockspaceId = ImGui::GetID( "MainDockspace" );
-	ImGui::DockSpace( dockspaceId );
-
-	constexpr const TCHAR* TRB_FILE_FILTER = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
-	constexpr const TCHAR* GLTF_FILE_FILTER = "3D Model Files (gltf){.gltf}";
-
-	if ( ImGui::BeginMainMenuBar() )
+	if ( !g_bHeadless )
 	{
-		if ( ImGui::BeginMenu( "File" ) )
-		{
-			if ( ImGui::MenuItem( "Open..." ) )
-			{
-				IGFD::FileDialogConfig config;
-				config.path = ".";
+		// Render to the window
+		pRender->BeginScene();
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", TRB_FILE_FILTER, config );
+		// Start the Dear ImGui frame
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplSDL2_NewFrame();
+		ImGui::NewFrame();
+
+		// Create main dock space
+		ImGuiViewport* imViewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos( imViewport->Pos );
+		ImGui::SetNextWindowSize( imViewport->Size );
+		ImGui::SetNextWindowViewport( imViewport->ID );
+
+		ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_MenuBar;
+		window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+		window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+
+		ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+		ImGui::Begin( "DockSpace", TNULL, window_flags );
+		ImGui::PopStyleVar();
+
+		ImGuiID dockspaceId = ImGui::GetID( "MainDockspace" );
+		ImGui::DockSpace( dockspaceId );
+
+		constexpr const TCHAR* TRB_FILE_FILTER  = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
+		constexpr const TCHAR* GLTF_FILE_FILTER = "3D Model Files (gltf){.gltf}";
+
+		if ( ImGui::BeginMainMenuBar() )
+		{
+			if ( ImGui::BeginMenu( "File" ) )
+			{
+				if ( ImGui::MenuItem( "Open..." ) )
+				{
+					IGFD::FileDialogConfig config;
+					config.path = ".";
+
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFile", "Choose File", TRB_FILE_FILTER, config );
+				}
+
+				ImGui::EndMenu();
 			}
 
-			ImGui::EndMenu();
-		}
-
-		if ( ImGui::BeginMenu( "Tools" ) )
-		{
-			if ( ImGui::MenuItem( "Create Skinned Model" ) )
+			if ( ImGui::BeginMenu( "Tools" ) )
 			{
-				IGFD::FileDialogConfig config;
-				config.path = ".";
+				if ( ImGui::MenuItem( "Create Skinned Model" ) )
+				{
+					IGFD::FileDialogConfig config;
+					config.path = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseGLTFFile", "Choose GLTF File", GLTF_FILE_FILTER, config );
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseGLTFFile", "Choose GLTF File", GLTF_FILE_FILTER, config );
+				}
+
+				if ( ImGui::MenuItem( "Texture Unpacker" ) )
+					TextureTool::Toggle();
+
+				if ( ImGui::MenuItem( "Engine Tool" ) )
+					EngineTool::Toggle();
+
+				ImGui::EndMenu();
 			}
 
-			if ( ImGui::MenuItem( "Texture Unpacker" ) )
-				TextureTool::Toggle();
-
-			if ( ImGui::MenuItem( "Engine Tool" ) )
-				EngineTool::Toggle();
-
-			ImGui::EndMenu();
-		}
-
-		if ( ImGui::BeginMenu( "Batch" ) )
-		{
-			if ( ImGui::MenuItem( "Decompress files..." ) )
+			if ( ImGui::BeginMenu( "Batch" ) )
 			{
-				IGFD::FileDialogConfig config;
-				config.countSelectionMax = 0;
-				config.path              = ".";
+				if ( ImGui::MenuItem( "Decompress files..." ) )
+				{
+					IGFD::FileDialogConfig config;
+					config.countSelectionMax = 0;
+					config.path              = ".";
 
-				ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", TRB_FILE_FILTER, config );
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseTRBFiles", "Choose Files", TRB_FILE_FILTER, config );
+				}
+
+				ImGui::EndMenu();
 			}
 
-			ImGui::EndMenu();
+			ImGui::EndMainMenuBar();
 		}
 
-		ImGui::EndMainMenuBar();
-	}
-
-	// Read TRB
-	if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFile" ) )
-	{
-		if ( ImGuiFileDialog::Instance()->IsOk() )
+		// Read TRB
+		if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFile" ) )
 		{
-			std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
-			std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
-
-			TRBFileWindow* pFileWindow = new TRBFileWindow();
-			TBOOL          bLoaded     = pFileWindow->LoadTRBFile( filePathName.c_str() );
-
-			if ( !bLoaded )
+			if ( ImGuiFileDialog::Instance()->IsOk() )
 			{
-				delete pFileWindow;
-				pFileWindow = TNULL;
-			}
+				std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+				std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
 
-			TRBWindowManager::GetSingleton()->AddWindow( pFileWindow );
-		}
+				TRBFileWindow* pFileWindow = new TRBFileWindow();
+				TBOOL          bLoaded     = pFileWindow->LoadTRBFile( filePathName.c_str() );
 
-		// close
-		ImGuiFileDialog::Instance()->Close();
-	}
+				if ( !bLoaded )
+				{
+					delete pFileWindow;
+					pFileWindow = TNULL;
+				}
 
-	// Read GLTF
-	if ( ImGuiFileDialog::Instance()->Display( "ChooseGLTFFile" ) )
-	{
-		if ( ImGuiFileDialog::Instance()->IsOk() )
-		{
-			std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
-			std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
-
-			TRBFileWindow* pFileWindow = new TRBFileWindow();
-			pFileWindow->LoadExternalFile( filePathName.c_str() );
-
-			// Need to create the resource view manually for now
-			ModelResourceView* pModelResView = new ModelResourceView();
-			pFileWindow->SetWindowName( TString8::VarArgs( "%s - %s", pFileWindow->GetFileName(), "Skinned Model" ).GetString() );
-			
-			if ( pFileWindow->LoadExternalResourceView( pModelResView ) )
-			{
-				// Everything seems to be fine, add the window
 				TRBWindowManager::GetSingleton()->AddWindow( pFileWindow );
 			}
-			else
-			{
-				// Something went wrong, free resources
-				delete pModelResView;
-				delete pFileWindow;
-			}
+
+			// close
+			ImGuiFileDialog::Instance()->Close();
 		}
 
-		// close
-		ImGuiFileDialog::Instance()->Close();
-	}
-
-	// Batch re-export TRB
-	if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFiles" ) )
-	{
-		if ( ImGuiFileDialog::Instance()->IsOk() )
+		// Read GLTF
+		if ( ImGuiFileDialog::Instance()->Display( "ChooseGLTFFile" ) )
 		{
-			auto selections = ImGuiFileDialog::Instance()->GetSelection();
-
-			for ( auto& selection : selections )
+			if ( ImGuiFileDialog::Instance()->IsOk() )
 			{
-				PTRB file( selection.second.c_str() );
-				file.WriteToFile( selection.second.c_str(), TFALSE );
+				std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+				std::string filePath     = ImGuiFileDialog::Instance()->GetCurrentPath();
+
+				TRBFileWindow* pFileWindow = new TRBFileWindow();
+				pFileWindow->LoadExternalFile( filePathName.c_str() );
+
+				// Need to create the resource view manually for now
+				ModelResourceView* pModelResView = new ModelResourceView();
+				pFileWindow->SetWindowName( TString8::VarArgs( "%s - %s", pFileWindow->GetFileName(), "Skinned Model" ).GetString() );
+
+				if ( pFileWindow->LoadExternalResourceView( pModelResView ) )
+				{
+					// Everything seems to be fine, add the window
+					TRBWindowManager::GetSingleton()->AddWindow( pFileWindow );
+				}
+				else
+				{
+					// Something went wrong, free resources
+					delete pModelResView;
+					delete pFileWindow;
+				}
 			}
+
+			// close
+			ImGuiFileDialog::Instance()->Close();
 		}
 
-		// close
-		ImGuiFileDialog::Instance()->Close();
+		// Batch re-export TRB
+		if ( ImGuiFileDialog::Instance()->Display( "ChooseTRBFiles" ) )
+		{
+			if ( ImGuiFileDialog::Instance()->IsOk() )
+			{
+				auto selections = ImGuiFileDialog::Instance()->GetSelection();
+
+				for ( auto& selection : selections )
+				{
+					PTRB file( selection.second.c_str() );
+					file.WriteToFile( selection.second.c_str(), TFALSE );
+				}
+			}
+
+			// close
+			ImGuiFileDialog::Instance()->Close();
+		}
+
+		TRBWindowManager::GetSingleton()->Render( flDeltaTime );
+		ToolManager::Render();
+
+		ImGui::End();
+
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
+
+		if ( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
+		{
+			SDL_Window*   backup_current_window  = SDL_GL_GetCurrentWindow();
+			SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
+			ImGui::UpdatePlatformWindows();
+			ImGui::RenderPlatformWindowsDefault();
+			SDL_GL_MakeCurrent( backup_current_window, backup_current_context );
+		}
+
+		pRender->EndScene();
 	}
-
-	TRBWindowManager::GetSingleton()->Render( flDeltaTime );
-	ToolManager::Render();
-
-	ImGui::End();
-
-	ImGui::Render();
-	ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
-
-	if ( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
-	{
-		SDL_Window*   backup_current_window  = SDL_GL_GetCurrentWindow();
-		SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
-		ImGui::UpdatePlatformWindows();
-		ImGui::RenderPlatformWindowsDefault();
-		SDL_GL_MakeCurrent( backup_current_window, backup_current_context );
-	}
-
-	SDL_Window*   backup_current_window  = SDL_GL_GetCurrentWindow();
-	SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
-
-	pRender->EndScene();
 
 	Resource::StreamedTexture_DestroyUnused();
 	Resource::StreamedKeyLib_DestroyUnused();
@@ -343,8 +359,13 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 	return TTRUE;
 }
 
+static T2CommandLine g_sCmd;
+T2CommandLine*       g_pCmd = &g_sCmd;
+
 int main( int argc, char** argv )
 {
+	g_sCmd.Create( GetCommandLineA() );
+
 	// Initialise engine
 	TUtil::TOSHIParams engineParams;
 	engineParams.szLogAppName  = "TRV";

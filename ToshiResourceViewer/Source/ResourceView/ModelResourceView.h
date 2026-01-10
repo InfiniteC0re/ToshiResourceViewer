@@ -21,6 +21,9 @@ public:
 	virtual void  OnDestroy() OVERRIDE;
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
+	void OnSaveTKL( PTRB* pOutTRB );
+	void SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
+
 private:
 	void ExportScene();
 
@@ -29,10 +32,12 @@ private:
 	ResourceLoader::ModelInstance m_ModelInstance;
 	TINT                          m_iSelectedSequence;
 
+	TBOOL m_bAutoSaveTKL;
+
 	Toshi::T2Camera        m_oCamera;
 	Toshi::T2RenderContext m_oRenderContext;
 	Toshi::T2FrameBuffer   m_ViewportFrameBuffer;
-	
+
 	Toshi::TVector4 m_vecCameraCenter;
 	TFLOAT          m_fCameraDistance;
 	TFLOAT          m_fCameraDistanceTarget;

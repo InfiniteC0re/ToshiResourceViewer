@@ -54,4 +54,6 @@ Toshi::T2SharedPtr<ResourceLoader::Model> Model_LoadSkin_GLTF( Toshi::T2StringVi
 TBOOL                                     Model_PrepareAnimations( ResourceLoader::Model* pModel );
 TBOOL                                     Model_CreateInstance( Toshi::T2SharedPtr<ResourceLoader::Model> pModel, ModelInstance& rOutInstance );
 
+void ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder );
+
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <Toshi/TApplication.h>
+#include <ToshiTools/T2CommandLine.h>
 #include <Render/T2Render.h>
 
 enum TOSHIGAME
@@ -45,4 +46,5 @@ private:
 	TOSHISKU  m_eSelectedPlatform = TOSHISKU_WINDOWS;
 };
 
-extern Application g_oTheApp;
+extern Application           g_oTheApp;
+extern Toshi::T2CommandLine* g_pCmd;

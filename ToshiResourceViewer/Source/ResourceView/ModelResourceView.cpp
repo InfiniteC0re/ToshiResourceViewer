@@ -28,6 +28,7 @@ ModelResourceView::ModelResourceView()
     , m_fCameraRotX( 0.0f )
     , m_fCameraRotY( 0.0f )
     , m_iSelectedSequence( -1 )
+    , m_bAutoSaveTKL( TFALSE )
 {
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
@@ -87,55 +88,17 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	const TBOOL bIsSkinnedMesh = TTRUE;
 	if ( !bIsSkinnedMesh ) return TFALSE;
 
+	auto pKeyLib = m_ModelInstance.pModel->pKeyLib;
+
+	if ( m_bAutoSaveTKL )
 	{
 		// Save TKL
-		PTRB* pTKLTRB       = new PTRB( pOutTRB->GetEndianess() );
-		auto  pTKLMemStream = pTKLTRB->GetSections()->CreateStream();
+		PTRB* pOutTRB       = new PTRB( pOutTRB->GetEndianess() );
+		auto  pMemStream = pOutTRB->GetSections()->CreateStream();
 
-		auto pSrcHeader = m_ModelInstance.pModel->pKeyLib->GetTRBHeader();
-		auto pTKLHeader = pTKLMemStream->Alloc<TKeyframeLibrary::TRBHeader>();
+		OnSaveTKL( pOutTRB );
 
-		pTKLMemStream->Alloc<TCHAR>( &pTKLHeader->m_szName, T2String8::Length( pSrcHeader->m_szName ) + 1 );
-		T2String8::Copy( pTKLHeader->m_szName, pSrcHeader->m_szName );
-		pTKLHeader->m_iNumTranslations = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumTranslations );
-		pTKLHeader->m_iNumQuaternions  = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumQuaternions );
-		pTKLHeader->m_iNumScales       = pTKLTRB->ConvertEndianess( pSrcHeader->m_iNumScales );
-		pTKLHeader->m_iTranslationSize = pTKLTRB->ConvertEndianess( pSrcHeader->m_iTranslationSize );
-		pTKLHeader->m_iQuaternionSize  = pTKLTRB->ConvertEndianess( pSrcHeader->m_iQuaternionSize );
-		pTKLHeader->m_iScaleSize       = pTKLTRB->ConvertEndianess( pSrcHeader->m_iScaleSize );
-		pTKLHeader->m_SomeVector       = TVector3( 0.0f, 0.0f, 0.0f );
-
-		pTKLMemStream->Alloc<TAnimVector>( &pTKLHeader->m_pTranslations, pSrcHeader->m_iNumTranslations );
-		pTKLMemStream->Alloc<TAnimQuaternion>( &pTKLHeader->m_pQuaternions, pSrcHeader->m_iNumQuaternions );
-		pTKLMemStream->Alloc<TAnimScale>( &pTKLHeader->m_pScales, pSrcHeader->m_iNumScales );
-		
-		for ( TINT i = 0; i < pSrcHeader->m_iNumTranslations; i++ )
-		{
-			pTKLHeader->m_pTranslations[ i ] = TVector3(
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].x ),
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].y ),
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].z )
-			);
-		}
-
-		for ( TINT i = 0; i < pSrcHeader->m_iNumQuaternions; i++ )
-		{
-			pTKLHeader->m_pQuaternions[ i ] = TQuaternion(
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].x ),
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].y ),
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].z ),
-			    pTKLTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].w )
-			);
-		}
-
-		for ( TINT i = 0; i < pSrcHeader->m_iNumScales; i++ )
-		{
-			pTKLHeader->m_pScales[ i ] = pTKLTRB->ConvertEndianess( pSrcHeader->m_pScales[ i ] );
-		}
-
-		pTKLTRB->GetSymbols()->Add( pTKLMemStream, "keylib", pTKLHeader.get() );
-
-		pTKLTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pSrcHeader->m_szName ).GetString(), TFALSE );
+		pOutTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pKeyLib->GetTRBHeader()->m_szName ).GetString(), TFALSE );
 	}
 
 	PTRBSections* pSECT = pOutTRB->GetSections();
@@ -155,9 +118,9 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	// Allocate SkeletonHeader symbol
 	auto pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
 	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, m_ModelInstance.pModel->oSkeletonHeader.m_szTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
-	pTRBSkeletonHeader->m_iTKeyCount = pOutTRB->ConvertEndianess( 0 );
-	pTRBSkeletonHeader->m_iQKeyCount = pOutTRB->ConvertEndianess( 0 );
-	pTRBSkeletonHeader->m_iSKeyCount = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
+	pTRBSkeletonHeader->m_iTKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumTranslations() );
+	pTRBSkeletonHeader->m_iQKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumQuaternions() );
+	pTRBSkeletonHeader->m_iSKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumScales() ); // Barnyard does not support scale keyframes
 	pTRBSkeletonHeader->m_iTBaseIndex = pOutTRB->ConvertEndianess( 0 );
 	pTRBSkeletonHeader->m_iQBaseIndex = pOutTRB->ConvertEndianess( 0 );
 	pTRBSkeletonHeader->m_iSBaseIndex = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
@@ -546,6 +509,55 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 			fnPrintErrorMessage( T2String8::ms_aScratchMem );
 		}
 	}
+}
+
+void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )
+{
+	// Save TKL
+	auto pMemStream = pOutTRB->GetSections()->GetStack( 0 );
+
+	auto pSrcHeader = m_ModelInstance.pModel->pKeyLib->GetTRBHeader();
+	auto pTKLHeader = pMemStream->Alloc<TKeyframeLibrary::TRBHeader>();
+
+	pMemStream->Alloc<TCHAR>( &pTKLHeader->m_szName, T2String8::Length( pSrcHeader->m_szName ) + 1 );
+	T2String8::Copy( pTKLHeader->m_szName, pSrcHeader->m_szName );
+	pTKLHeader->m_iNumTranslations = pOutTRB->ConvertEndianess( pSrcHeader->m_iNumTranslations );
+	pTKLHeader->m_iNumQuaternions  = pOutTRB->ConvertEndianess( pSrcHeader->m_iNumQuaternions );
+	pTKLHeader->m_iNumScales       = pOutTRB->ConvertEndianess( pSrcHeader->m_iNumScales );
+	pTKLHeader->m_iTranslationSize = pOutTRB->ConvertEndianess( pSrcHeader->m_iTranslationSize );
+	pTKLHeader->m_iQuaternionSize  = pOutTRB->ConvertEndianess( pSrcHeader->m_iQuaternionSize );
+	pTKLHeader->m_iScaleSize       = pOutTRB->ConvertEndianess( pSrcHeader->m_iScaleSize );
+	pTKLHeader->m_SomeVector       = TVector3( 0.0f, 0.0f, 0.0f );
+
+	pMemStream->Alloc<TAnimVector>( &pTKLHeader->m_pTranslations, pSrcHeader->m_iNumTranslations );
+	pMemStream->Alloc<TAnimQuaternion>( &pTKLHeader->m_pQuaternions, pSrcHeader->m_iNumQuaternions );
+	pMemStream->Alloc<TAnimScale>( &pTKLHeader->m_pScales, pSrcHeader->m_iNumScales );
+
+	for ( TINT i = 0; i < pSrcHeader->m_iNumTranslations; i++ )
+	{
+		pTKLHeader->m_pTranslations[ i ] = TVector3(
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].x ),
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].y ),
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pTranslations[ i ].z )
+		);
+	}
+
+	for ( TINT i = 0; i < pSrcHeader->m_iNumQuaternions; i++ )
+	{
+		pTKLHeader->m_pQuaternions[ i ] = TQuaternion(
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].x ),
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].y ),
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].z ),
+		    pOutTRB->ConvertEndianess( pSrcHeader->m_pQuaternions[ i ].w )
+		);
+	}
+
+	for ( TINT i = 0; i < pSrcHeader->m_iNumScales; i++ )
+	{
+		pTKLHeader->m_pScales[ i ] = pOutTRB->ConvertEndianess( pSrcHeader->m_pScales[ i ] );
+	}
+
+	pOutTRB->GetSymbols()->Add( pMemStream, "keylib", pTKLHeader.get() );
 }
 
 void ModelResourceView::ExportScene()

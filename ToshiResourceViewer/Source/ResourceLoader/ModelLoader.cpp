@@ -42,6 +42,9 @@ static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 	return TNULL;
 }
 
+// Specify builder to compile models with common key library
+static TKLBuilder* s_pTKLBuilder = TNULL;
+
 static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess, ResourceLoader::Model* pModel, TINT iIndex, TModelLOD& rOutLOD, TTMDWin::TRBLODHeader& rLODHeader )
 {
 	TINT iMeshCount = CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount1 ) + CONVERTENDIANESS( eEndianess, rLODHeader.m_iMeshCount2 );
@@ -345,7 +348,9 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		}
 
 		// Setup animations
-		TKLBuilder oTKLBuilder;
+		TKLBuilder  oTKLBuilder;
+		const TBOOL bGlobalTKLBuilder = s_pTKLBuilder != TNULL;
+		TKLBuilder* pTKLBuilder       = bGlobalTKLBuilder ? s_pTKLBuilder : &oTKLBuilder;
 
 		pModel->pSkeleton->m_SkeletonSequences = new TSkeletonSequence[ iNumSeq ];
 		TSkeletonSequence* pSeqs               = pModel->pSkeleton->m_SkeletonSequences;
@@ -474,14 +479,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 								TASSERT( pKeyFrame->iRotation == -1 );
 								TQuaternion& quatRotation = *(TQuaternion*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
 
-								pKeyFrame->iRotation = oTKLBuilder.AddRotation( quatRotation );
+								pKeyFrame->iRotation = pTKLBuilder->AddRotation( quatRotation );
 							}
 							else if ( bIsTranslation )
 							{
 								TASSERT( pKeyFrame->iTranslation == -1 );
 								TVector3& vPosition = *(TVector3*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
 								
-								pKeyFrame->iTranslation = oTKLBuilder.AddTranslation( vPosition );
+								pKeyFrame->iTranslation = pTKLBuilder->AddTranslation( vPosition );
 							}
 						}
 					}
@@ -508,25 +513,34 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 					}
 				}
 			}
-
-			// TODO: create TKL and fill animation info
-			// I'm too lazy to do it now
 		}
 
-		static TINT s_iTKLId = 0;
-		TString8 strTKLName = TString8::VarArgs( "dyn_tkl%d", s_iTKLId++ );
-		TASSERT( strTKLName.Length() <= sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 && "Curse me if this happened" );
+		if ( bGlobalTKLBuilder )
+		{
+			// Use name from the global builder
+			TASSERT( pTKLBuilder->GetName().Length() > 0 );
+			T2String8::Copy( pModel->oSkeletonHeader.m_szTKLName, pTKLBuilder->GetName(), sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 );
+		}
+		else
+		{
+			// Generate name
+			static TINT s_iTKLId = 0;
+			TString8 strTKLName = TString8::VarArgs( "dyn_tkl%d", s_iTKLId++ );
+			TASSERT( strTKLName.Length() <= sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 && "Curse me if this happened" );
+			T2String8::Copy( pModel->oSkeletonHeader.m_szTKLName, strTKLName.GetString(), sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 );
+		}
 
-		oTKLBuilder.SetName( strTKLName.GetString() );
-
-		T2String8::Copy( pModel->oSkeletonHeader.m_szTKLName, strTKLName.GetString(), sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 );
-		pModel->oSkeletonHeader.m_iTKeyCount  = oTKLBuilder.GetTranslations().Size();
-		pModel->oSkeletonHeader.m_iQKeyCount  = oTKLBuilder.GetRotations().Size();
-		pModel->oSkeletonHeader.m_iSKeyCount  = oTKLBuilder.GetScales().Size();
+		pModel->oSkeletonHeader.m_iTKeyCount  = pTKLBuilder->GetTranslations().Size();
+		pModel->oSkeletonHeader.m_iQKeyCount  = pTKLBuilder->GetRotations().Size();
+		pModel->oSkeletonHeader.m_iSKeyCount  = pTKLBuilder->GetScales().Size();
 		pModel->oSkeletonHeader.m_iTBaseIndex = 0;
 		pModel->oSkeletonHeader.m_iQBaseIndex = 0;
 		pModel->oSkeletonHeader.m_iSBaseIndex = 0;
-		pModel->pKeyLib                       = Resource::StreamedKeyLib_Create( TPS8D( pModel->oSkeletonHeader.m_szTKLName ), oTKLBuilder );
+
+		if ( bGlobalTKLBuilder )
+			pModel->pKeyLib = Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( pTKLBuilder->GetName() ) );
+		else
+			pModel->pKeyLib = Resource::StreamedKeyLib_Create( TPS8D( pModel->oSkeletonHeader.m_szTKLName ), *pTKLBuilder );
 
 		Model_PrepareAnimations( pModel );
 	}
@@ -863,6 +877,11 @@ TBOOL ResourceLoader::Model_CreateInstance( Toshi::T2SharedPtr<Model> pModel, Mo
 	rOutInstance.pSkeletonInstance = ( pModel->pSkeleton ) ? pModel->pSkeleton->CreateInstance( TTRUE ) : TNULL;
 
 	return TTRUE;
+}
+
+void ResourceLoader::ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder )
+{
+	s_pTKLBuilder = pTKLBuilder;
 }
 
 ResourceLoader::Model::Model()
