@@ -230,10 +230,11 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	{
 		// The joints NEED to be fixed!!! The shader normalizes them and divides by 3, so preprocessing is needed here!!!
 		TUINT uiStartVertex = 0;
-
+		TUINT uiPrevNumVertices = 0;
 		T2_FOREACH( vecSubMeshes, it )
 		{
-			TUINT uiNumSubMeshVertices = ( it->uiNumUsedVertices == uiNumTotalVertices ) ? uiNumTotalVertices - uiStartVertex : it->uiNumUsedVertices;
+			TUINT uiNumSubMeshVertices = ( it.Index() == 0 ) ? it->uiEndVertexId : it->uiEndVertexId - uiPrevNumVertices;
+			uiPrevNumVertices          = it->uiEndVertexId;
 
 			TASSERT( uiStartVertex < uiNumTotalVertices );
 			TASSERT( uiStartVertex + uiNumSubMeshVertices <= uiNumTotalVertices );
@@ -261,10 +262,12 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	gltfBuffer.data.insert( gltfBuffer.data.end(), vecVertices.Begin(), vecVertices.End() );
 
 	TUINT uiStartVertex = 0;
+	TUINT uiPrevNumVertices = 0;
 	T2_FOREACH( vecSubMeshes, it )
 	{
-		TSIZE uiBufferBaseOffset = gltfBuffer.data.size();
-		TUINT uiNumSubMeshVertices = ( it->uiNumUsedVertices == uiNumTotalVertices ) ? uiNumTotalVertices - uiStartVertex : it->uiNumUsedVertices;
+		TSIZE uiBufferBaseOffset   = gltfBuffer.data.size();
+		TUINT uiNumSubMeshVertices = ( it.Index() == 0 ) ? it->uiEndVertexId : it->uiEndVertexId - uiPrevNumVertices;
+		uiPrevNumVertices          = it->uiEndVertexId;
 
 		//-----------------------------------------------------------------------------
 		// 1. Vertex Buffer View
@@ -500,7 +503,7 @@ TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<
 		TASSERT( !bAllocateVertexBuffer || pSubMesh->uiNumAllocatedVertices == uiNumTotalVertices );
 
 		pTRBSubMesh->m_uiNumVertices1 = a_pTRB->ConvertEndianess( bAllocateVertexBuffer ? uiNumTotalVertices : 0 );
-		pTRBSubMesh->m_uiNumVertices2 = a_pTRB->ConvertEndianess( pSubMesh->uiNumUsedVertices );
+		pTRBSubMesh->m_uiNumVertices2 = a_pTRB->ConvertEndianess( pSubMesh->uiEndVertexId );
 		pTRBSubMesh->m_uiNumIndices   = a_pTRB->ConvertEndianess( pSubMesh->uiNumIndices );
 		pTRBSubMesh->m_uiNumBones     = a_pTRB->ConvertEndianess( pSubMesh->uiNumBones );
 		pTRBSubMesh->m_Zero           = a_pTRB->ConvertEndianess( 0 );

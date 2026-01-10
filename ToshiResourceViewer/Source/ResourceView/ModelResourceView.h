@@ -23,9 +23,9 @@ public:
 
 	void OnSaveTKL( PTRB* pOutTRB );
 	void SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
+	void ExportScene( Toshi::T2StringView pchOutFileName );
 
-private:
-	void ExportScene();
+	TBOOL TryFixingMissingTKL();
 
 private:
 	Toshi::T2FormatString64       m_strAnimationsId;

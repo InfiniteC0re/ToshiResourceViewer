@@ -23,7 +23,7 @@ public:
 		Toshi::T2IndexBuffer  oIndexBuffer;
 		Toshi::T2VertexArray  oVertexArray;
 		TUINT32               uiNumAllocatedVertices;
-		TUINT32               uiNumUsedVertices;
+		TUINT32               uiEndVertexId;
 		TUINT32               uiNumIndices;
 		TUINT32               uiNumBones;
 		TINT                  aBones[ SKINNED_SUBMESH_MAX_BONES ];

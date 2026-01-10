@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ModelResourceView.h"
 #include "Shader/Mesh.h"
+
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
 #include <Toshi/T2Map.h>
@@ -50,6 +51,7 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	{
 		// Create from GLTF
 
+		// Skinned mesh
 		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( pchFilePath ), m_ModelInstance );
 	}
 	else
@@ -74,7 +76,7 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
 	m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
 	
-	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid();
+	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid() && TryFixingMissingTKL();
 }
 
 TBOOL ModelResourceView::CanSave()
@@ -93,12 +95,12 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	if ( m_bAutoSaveTKL )
 	{
 		// Save TKL
-		PTRB* pOutTRB       = new PTRB( pOutTRB->GetEndianess() );
-		auto  pMemStream = pOutTRB->GetSections()->CreateStream();
+		PTRB* pTKLTRB       = new PTRB( pOutTRB->GetEndianess() );
+		auto  pMemStream = pTKLTRB->GetSections()->CreateStream();
 
-		OnSaveTKL( pOutTRB );
+		OnSaveTKL( pTKLTRB );
 
-		pOutTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pKeyLib->GetTRBHeader()->m_szName ).GetString(), TFALSE );
+		pTKLTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pKeyLib->GetTRBHeader()->m_szName ).GetString(), TFALSE );
 	}
 
 	PTRBSections* pSECT = pOutTRB->GetSections();
@@ -350,7 +352,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 	ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Export" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
 	if ( ImGui::SmallButton( "Export" ) )
-		ExportScene();
+		ExportScene( "D:\\exported.gltf" );
 
 	// Prepare camera
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
@@ -560,7 +562,7 @@ void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )
 	pOutTRB->GetSymbols()->Add( pMemStream, "keylib", pTKLHeader.get() );
 }
 
-void ModelResourceView::ExportScene()
+void ModelResourceView::ExportScene( Toshi::T2StringView pchOutFileName )
 {
 	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
 	if ( !pModel ) return;
@@ -897,5 +899,27 @@ void ModelResourceView::ExportScene()
 
 	// Write to the file
 	tinygltf::TinyGLTF gltfWriter;
-	gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
+	gltfWriter.WriteGltfSceneToFile( &gltfModel, pchOutFileName.Get(), TFALSE, TTRUE, TTRUE, TFALSE );
+}
+
+TBOOL ModelResourceView::TryFixingMissingTKL()
+{
+	if ( m_ModelInstance.pModel->pKeyLib && m_ModelInstance.pModel->pKeyLib->IsDummy() )
+	{
+		PTRB oTKLFile;
+
+		TString8   strModelDir;
+		const TINT iLastSlashIndex = m_strFilePath.FindReverse( '\\' );
+		strModelDir.Copy( m_strFilePath, iLastSlashIndex + 1 );
+
+		if ( !oTKLFile.ReadFromFile( TString8::VarArgs( "%s\\%s.tkl", strModelDir.GetString(), m_ModelInstance.pModel->pKeyLib->GetName().GetString() ).GetString() ) )
+			return TFALSE;
+
+		auto pTKLHeader = oTKLFile.GetSymbols()->Find<TKeyframeLibrary::TRBHeader>( oTKLFile.GetSections(), "keylib" );
+		if ( !pTKLHeader ) return TFALSE;
+
+		return m_ModelInstance.pModel->pKeyLib->Create( pTKLHeader.get() ) && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel );
+	}
+
+	return TTRUE;
 }

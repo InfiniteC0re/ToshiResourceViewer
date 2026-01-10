@@ -86,7 +86,7 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 
 			pSubMesh->uiNumIndices           = pTRBSubMesh->m_uiNumIndices;
 			pSubMesh->uiNumAllocatedVertices = pTRBSubMesh->m_uiNumVertices1;
-			pSubMesh->uiNumUsedVertices      = pTRBSubMesh->m_uiNumVertices2;
+			pSubMesh->uiEndVertexId          = pTRBSubMesh->m_uiNumVertices2;
 			pSubMesh->uiNumBones             = pTRBSubMesh->m_uiNumBones;
 
 			TASSERT( pTRBSubMesh->m_uiNumBones <= SKINNED_SUBMESH_MAX_BONES );
@@ -820,7 +820,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 			pSubMesh->uiNumIndices      = uiNumIndices;
 			pSubMesh->oIndexBuffer      = T2Render::CreateIndexBuffer( pIndices, uiNumIndices, GL_STATIC_DRAW );
-			pSubMesh->uiNumUsedVertices = uiNumVerticesOrig;
+			pSubMesh->uiEndVertexId     = uiStartVertex + uiNumVerticesOrig;
 			pSubMesh->uiNumBones        = mapUsedBones.Size();
 
 			// Clean NvTriStrip's object
