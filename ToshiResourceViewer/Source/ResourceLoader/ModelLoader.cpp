@@ -33,7 +33,7 @@ static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 {
 	for ( TINT i = 0; i < s_oCurrentModelMaterialsHeader.iNumMaterials; i++ )
 	{
-		if ( TStringManager::String8Compare( s_oCurrentModelMaterials[ i ].szMatName, a_szName ) == 0 )
+		if ( TStringManager::String8CompareNoCase( s_oCurrentModelMaterials[ i ].szMatName, a_szName ) == 0 )
 		{
 			return &s_oCurrentModelMaterials[ i ];
 		}
@@ -627,6 +627,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		tinygltf::Skin* pGLTFSkin = ( bHasSkins ) ? &gltfModel.skins[ 0 ] : TNULL;
 
 		// Handle submeshes
+		TINT iPreviousAccPositionIndex = -1;
 		for ( TINT k = 0; k < vecSubMeshes.Size(); k++ )
 		{
 			auto& gltfSubMesh          = gltfModel.meshes[ vecSubMeshes[ k ] ];
@@ -647,6 +648,9 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			const TINT iAccWeightsIndex  = gltfSubMeshPrimitive.attributes[ "WEIGHTS_0" ];
 			const TINT iAccJointsIndex   = gltfSubMeshPrimitive.attributes[ "JOINTS_0" ];
 			const TINT iAccUVIndex       = gltfSubMeshPrimitive.attributes[ "TEXCOORD_0" ];
+
+			const TBOOL bSharedVertexPool = iPreviousAccPositionIndex == iAccPositionIndex;
+			iPreviousAccPositionIndex     = iAccPositionIndex;
 
 			auto& gltfIndexAccessor    = gltfModel.accessors[ iAccIndicesIndex ];
 			auto& gltfPositionAccessor = gltfModel.accessors[ iAccPositionIndex ];
@@ -674,8 +678,45 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 			const TUINT uiStartVertex = vecVertices.Size();
 
+			// Setup indices
+			const TUINT              uiNumIndicesOrig = gltfIndexAccessor.count;
+			T2DynamicVector<TUINT16> vecIndices;
+			vecIndices.SetSize( uiNumIndicesOrig );
+
+			auto        pGltfDataIndex      = gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset;
+			const TUINT uiIndexBufferStride = ( gltfIndexBufferView.byteStride != 0 ) ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
+			const TBOOL bIsTriangleStrip    = gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLE_STRIP;
+
+			// Copy indices
+			for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+			{
+				TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
+
+				if ( bSharedVertexPool )
+				{
+					// Using a shared vertex pool, so just copy the index
+					vecIndices[ j ] = uiIndex;
+				}
+				else
+				{
+					// Not using shared pool, need to increase index by the last vertex id
+					if ( !bIsTriangleStrip || uiIndex != 0xFFFF ) vecIndices[ j ] = uiIndex + uiStartVertex;
+					else vecIndices[ j ] = 0xFFFF;
+				}
+			}
+
+			// Count vertices
+			T2RedBlackTree<TUINT16> treeUsedVertices;
+			for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+			{
+				TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
+				if ( bIsTriangleStrip && uiIndex == 0xFFFF ) continue;
+
+				if ( treeUsedVertices.Find( uiIndex ) == treeUsedVertices.End() ) treeUsedVertices.Insert( uiIndex );
+			}
+
 			// Setup vertices
-			const TUINT uiNumVerticesOrig = gltfPositionAccessor.count;
+			const TUINT uiNumVerticesOrig = treeUsedVertices.Size();
 			vecVertices.SetSize( uiStartVertex + uiNumVerticesOrig );
 
 			TASSERT( gltfPositionAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
@@ -704,9 +745,12 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			const TUINT uiUVBufferStride = ( gltfUVBufferView.byteStride != 0 ) ? gltfUVBufferView.byteStride : sizeof( TVector2 );
 			
 			// Build vertices
+			TUINT j = uiStartVertex;
 			T2Map<TINT, TINT> mapUsedBones;
-			for ( TUINT j = uiStartVertex, m = 0; j < uiStartVertex + uiNumVerticesOrig; j++, m++ )
+			T2_FOREACH( treeUsedVertices, itVertex )
 			{
+				TUINT16 m = *itVertex;
+
 				vecVertices[ j ].Position = *(TVector3*)( &*( pGltfDataPosition + ( uiPositionBufferStride * m ) + gltfPositionAccessor.byteOffset ) );
 				vecVertices[ j ].Normal   = *(TVector3*)( &*( pGltfDataNormal + ( uiNormalBufferStride * m ) + gltfNormalAccessor.byteOffset ) );
 				vecVertices[ j ].UV       = *(TVector2*)( &*( pGltfDataUV + ( uiUVBufferStride * m ) + gltfUVAccessor.byteOffset ) );
@@ -780,30 +824,23 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? TUINT8( flWeight2 * 255.0f ) : 0;
 				vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? TUINT8( flWeight3 * 255.0f ) : 0;
 				vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? TUINT8( flWeight4 * 255.0f ) : 0;
+
+				j += 1;
 			}
+
+			// Need to manually delete all elements
+			treeUsedVertices.DeleteAll();
 
 			TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Too many bones per mesh (> 28) - split the mesh in your editing tool!!!" );
 
 			T2VertexArray::Unbind();
 
 			// Setup submesh data
-			// We'll create Vertex Buffer later, because all submeshes use a shared one and we need to store all vertices in it
-			const TUINT              uiNumIndicesOrig = gltfIndexAccessor.count;
-			T2DynamicVector<TUINT16> vecIndices;
-			vecIndices.SetSize( uiNumIndicesOrig );
-
-			auto        pGltfDataIndex      = gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset;
-			const TUINT uiIndexBufferStride = ( gltfIndexBufferView.byteStride != 0 ) ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
-
-			// Copy indices
-			for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
-				vecIndices[ j ] = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) ) + uiStartVertex;
-
 			PrimitiveGroup* pPrims       = NULL;
 			TUINT16*        pIndices     = vecIndices.Begin();
 			TUINT           uiNumIndices = vecIndices.Size();
 
-			if ( gltfPrimitive.mode != TINYGLTF_MODE_TRIANGLE_STRIP )
+			if ( gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES )
 			{
 				//SetListsOnly( TTRUE );
 

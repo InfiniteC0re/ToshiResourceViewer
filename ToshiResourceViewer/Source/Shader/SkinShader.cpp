@@ -261,111 +261,107 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	// Insert data to the GLTF buffer
 	gltfBuffer.data.insert( gltfBuffer.data.end(), vecVertices.Begin(), vecVertices.End() );
 
-	TUINT uiStartVertex = 0;
-	TUINT uiPrevNumVertices = 0;
+	//-----------------------------------------------------------------------------
+	// 3. Vertex Buffer View
+	//-----------------------------------------------------------------------------
+	tinygltf::BufferView gltfBufferViewVertex;
+	gltfBufferViewVertex.buffer     = iBufferIndex;
+	gltfBufferViewVertex.byteOffset = 0;
+	gltfBufferViewVertex.byteLength = uiNumTotalVertices * sizeof( SkinVertex );
+	gltfBufferViewVertex.byteStride = sizeof( SkinVertex );
+	gltfBufferViewVertex.target     = TINYGLTF_TARGET_ARRAY_BUFFER;
+
+	a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewVertex ) );
+	const TINT iVertexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
+
+	//-----------------------------------------------------------------------------
+	// 4. Vertex Buffer Accessor
+	//-----------------------------------------------------------------------------
+
+	// Calculate min/max vertices
+	std::vector<double> min_vals = {
+		std::numeric_limits<double>::max(),
+		std::numeric_limits<double>::max(),
+		std::numeric_limits<double>::max()
+	};
+	std::vector<double> max_vals = {
+		std::numeric_limits<double>::lowest(),
+		std::numeric_limits<double>::lowest(),
+		std::numeric_limits<double>::lowest()
+	};
+
+	for ( TUINT i = 0; i < uiNumTotalVertices; i++ )
+	{
+		min_vals[ 0 ] = TMath::Min( min_vals[ 0 ], TDOUBLE( pVertices[ i ].Position.x ) );
+		min_vals[ 1 ] = TMath::Min( min_vals[ 1 ], TDOUBLE( pVertices[ i ].Position.y ) );
+		min_vals[ 2 ] = TMath::Min( min_vals[ 2 ], TDOUBLE( pVertices[ i ].Position.z ) );
+
+		max_vals[ 0 ] = TMath::Max( max_vals[ 0 ], TDOUBLE( pVertices[ i ].Position.x ) );
+		max_vals[ 1 ] = TMath::Max( max_vals[ 1 ], TDOUBLE( pVertices[ i ].Position.y ) );
+		max_vals[ 2 ] = TMath::Max( max_vals[ 2 ], TDOUBLE( pVertices[ i ].Position.z ) );
+	}
+
+	// Position
+	tinygltf::Accessor gltfAccPosition;
+	gltfAccPosition.bufferView    = iVertexBufferView;
+	gltfAccPosition.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+	gltfAccPosition.type          = TINYGLTF_TYPE_VEC3;
+	gltfAccPosition.count         = uiNumTotalVertices;
+	gltfAccPosition.byteOffset    = offsetof( SkinVertex, Position );
+	gltfAccPosition.minValues     = std::move( min_vals );
+	gltfAccPosition.maxValues     = std::move( max_vals );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccPosition ) );
+	const TINT iAccPositionIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// Normal
+	tinygltf::Accessor gltfAccNormal;
+	gltfAccNormal.bufferView    = iVertexBufferView;
+	gltfAccNormal.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+	gltfAccNormal.type          = TINYGLTF_TYPE_VEC3;
+	gltfAccNormal.count         = uiNumTotalVertices;
+	gltfAccNormal.byteOffset    = offsetof( SkinVertex, Normal );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccNormal ) );
+	const TINT iAccNormalIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// Weights
+	tinygltf::Accessor gltfAccWeights;
+	gltfAccWeights.bufferView    = iVertexBufferView;
+	gltfAccWeights.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+	gltfAccWeights.type          = TINYGLTF_TYPE_VEC4;
+	gltfAccWeights.count         = uiNumTotalVertices;
+	gltfAccWeights.normalized    = TTRUE;
+	gltfAccWeights.byteOffset    = offsetof( SkinVertex, Weights );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccWeights ) );
+	const TINT iAccWeightsIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// Joints
+	tinygltf::Accessor gltfAccJoints;
+	gltfAccJoints.bufferView    = iVertexBufferView;
+	gltfAccJoints.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+	gltfAccJoints.type          = TINYGLTF_TYPE_VEC4;
+	gltfAccJoints.count         = uiNumTotalVertices;
+	gltfAccJoints.byteOffset    = offsetof( SkinVertex, Bones );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccJoints ) );
+	const TINT iAccJointsIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
+	// UV
+	tinygltf::Accessor gltfAccUV;
+	gltfAccUV.bufferView    = iVertexBufferView;
+	gltfAccUV.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+	gltfAccUV.type          = TINYGLTF_TYPE_VEC2;
+	gltfAccUV.count         = uiNumTotalVertices;
+	gltfAccUV.byteOffset    = offsetof( SkinVertex, UV );
+
+	a_rOutModel.accessors.push_back( std::move( gltfAccUV ) );
+	const TINT iAccUVIndex = TINT( a_rOutModel.accessors.size() - 1 );
+
 	T2_FOREACH( vecSubMeshes, it )
 	{
-		TSIZE uiBufferBaseOffset   = gltfBuffer.data.size();
-		TUINT uiNumSubMeshVertices = ( it.Index() == 0 ) ? it->uiEndVertexId : it->uiEndVertexId - uiPrevNumVertices;
-		uiPrevNumVertices          = it->uiEndVertexId;
-
-		//-----------------------------------------------------------------------------
-		// 1. Vertex Buffer View
-		//-----------------------------------------------------------------------------
-		tinygltf::BufferView gltfBufferViewVertex;
-		gltfBufferViewVertex.buffer     = iBufferIndex;
-		gltfBufferViewVertex.byteOffset = uiStartVertex * sizeof( SkinVertex );
-		gltfBufferViewVertex.byteLength = uiNumSubMeshVertices * sizeof( SkinVertex );
-		gltfBufferViewVertex.byteStride = sizeof( SkinVertex );
-		gltfBufferViewVertex.target     = TINYGLTF_TARGET_ARRAY_BUFFER;
-
-		a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewVertex ) );
-		const TINT iVertexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
-
-		//-----------------------------------------------------------------------------
-		// 2. Vertex Buffer Accessor
-		//-----------------------------------------------------------------------------
-
-		// Calculate min/max vertices
-		std::vector<double> min_vals = {
-			std::numeric_limits<double>::max(),
-			std::numeric_limits<double>::max(),
-			std::numeric_limits<double>::max()
-		};
-		std::vector<double> max_vals = {
-			std::numeric_limits<double>::lowest(),
-			std::numeric_limits<double>::lowest(),
-			std::numeric_limits<double>::lowest()
-		};
-
-		for ( TUINT i = 0; i < uiNumSubMeshVertices; i++ )
-		{
-			min_vals[ 0 ] = TMath::Min( min_vals[ 0 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.x ) );
-			min_vals[ 1 ] = TMath::Min( min_vals[ 1 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.y ) );
-			min_vals[ 2 ] = TMath::Min( min_vals[ 2 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.z ) );
-
-			max_vals[ 0 ] = TMath::Max( max_vals[ 0 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.x ) );
-			max_vals[ 1 ] = TMath::Max( max_vals[ 1 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.y ) );
-			max_vals[ 2 ] = TMath::Max( max_vals[ 2 ], TDOUBLE( pVertices[ uiStartVertex + i ].Position.z ) );
-		}
-
-		// Position
-		tinygltf::Accessor gltfAccPosition;
-		gltfAccPosition.bufferView    = iVertexBufferView;
-		gltfAccPosition.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-		gltfAccPosition.type          = TINYGLTF_TYPE_VEC3;
-		gltfAccPosition.count         = uiNumSubMeshVertices;
-		gltfAccPosition.byteOffset    = offsetof( SkinVertex, Position );
-		gltfAccPosition.minValues     = std::move( min_vals );
-		gltfAccPosition.maxValues     = std::move( max_vals );
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccPosition ) );
-		const TINT iAccPositionIndex = TINT( a_rOutModel.accessors.size() - 1 );
-
-		// Normal
-		tinygltf::Accessor gltfAccNormal;
-		gltfAccNormal.bufferView    = iVertexBufferView;
-		gltfAccNormal.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-		gltfAccNormal.type          = TINYGLTF_TYPE_VEC3;
-		gltfAccNormal.count         = uiNumSubMeshVertices;
-		gltfAccNormal.byteOffset    = offsetof( SkinVertex, Normal );
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccNormal ) );
-		const TINT iAccNormalIndex = TINT( a_rOutModel.accessors.size() - 1 );
-
-		// Weights
-		tinygltf::Accessor gltfAccWeights;
-		gltfAccWeights.bufferView    = iVertexBufferView;
-		gltfAccWeights.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-		gltfAccWeights.type          = TINYGLTF_TYPE_VEC4;
-		gltfAccWeights.count         = uiNumSubMeshVertices;
-		gltfAccWeights.normalized    = TTRUE;
-		gltfAccWeights.byteOffset    = offsetof( SkinVertex, Weights );
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccWeights ) );
-		const TINT iAccWeightsIndex = TINT( a_rOutModel.accessors.size() - 1 );
-
-		// Joints
-		tinygltf::Accessor gltfAccJoints;
-		gltfAccJoints.bufferView    = iVertexBufferView;
-		gltfAccJoints.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-		gltfAccJoints.type          = TINYGLTF_TYPE_VEC4;
-		gltfAccJoints.count         = uiNumSubMeshVertices;
-		gltfAccJoints.byteOffset    = offsetof( SkinVertex, Bones );
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccJoints ) );
-		const TINT iAccJointsIndex = TINT( a_rOutModel.accessors.size() - 1 );
-
-		// UV
-		tinygltf::Accessor gltfAccUV;
-		gltfAccUV.bufferView    = iVertexBufferView;
-		gltfAccUV.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-		gltfAccUV.type          = TINYGLTF_TYPE_VEC2;
-		gltfAccUV.count         = uiNumSubMeshVertices;
-		gltfAccUV.byteOffset    = offsetof( SkinVertex, UV );
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccUV ) );
-		const TINT iAccUVIndex = TINT( a_rOutModel.accessors.size() - 1 );
+		TSIZE uiBufferBaseOffset = gltfBuffer.data.size();
 
 		//-----------------------------------------------------------------------------
 		// 1. Index Buffer
@@ -377,14 +373,6 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 		Toshi::T2DynamicVector<TBYTE> vecIndices;
 		vecIndices.SetSize( iIndexBufferSize );
 		it->oVertexArray.GetIndexBuffer().GetSubData( vecIndices.Begin(), 0, iIndexBufferSize );
-
-		for ( TINT i = 0; i < iIndexBufferSize; i += sizeof( TUINT16 ) )
-		{
-			TUINT16* pId = (TUINT16*)&vecIndices[ i ];
-
-			TASSERT( *pId >= uiStartVertex );
-			*pId -= uiStartVertex;
-		}
 
 		// Insert data to the GLTF buffer
 		gltfBuffer.data.insert( gltfBuffer.data.end(), vecIndices.Begin(), vecIndices.End() );
@@ -432,8 +420,6 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 
 		gltfMesh.primitives.push_back( std::move( gltfPrimitive ) );
 		a_rOutModel.meshes.push_back( std::move( gltfMesh ) );
-
-		uiStartVertex += uiNumSubMeshVertices;
 	}
 
 	// Add the buffer for this mesh
