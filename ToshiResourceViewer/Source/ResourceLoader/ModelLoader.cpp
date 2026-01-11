@@ -3,6 +3,7 @@
 #include "Shader/SkinShader.h"
 #include "Resource/StreamedTexture.h"
 #include "NvTriStrip/NvTriStrip.h"
+#include "Application.h"
 
 #include <Toshi/T2String.h>
 #include <Toshi/T2Vector.h>
@@ -237,14 +238,37 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 	if ( bHasSkins )
 	{
 		TINFO( "Detected skin\n" );
-
 		auto pGLTFSkin = &gltfModel.skins[ 0 ];
+		
+		// Get animations
+		static TBOOL bAllowDuplicates = g_pCmd->HasParameter( "-allow-duplicates" );
+
+		T2DynamicVector<T2Pair<TSIZE, TString8>> vecAnimations;
+		for ( TSIZE i = 0; i < gltfModel.animations.size(); i++ )
+		{
+			const std::string& strAnimName = gltfModel.animations[ i ].name;
+			if ( !bAllowDuplicates )
+			{
+				// Check ending of the name (f.e. .001)
+				if ( strAnimName.size() > 4 && strAnimName[ strAnimName.size() - 4 ] == '.' && std::isdigit( strAnimName[ strAnimName.size() - 3 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 2 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 1 ] ) )
+					continue;
+
+				// Check the name is already in the list
+				TBOOL bDuplicate = TFALSE;
+				for ( TSIZE k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
+					bDuplicate = ( vecAnimations[ k ].second.CompareNoCase( strAnimName.c_str() ) == 0 );
+
+				if ( bDuplicate ) continue;
+			}
+
+			vecAnimations.PushBack( { i, strAnimName.c_str() } );
+		}
 
 		// Initialise TSkeleton
 		pModel->pSkeleton = new TSkeleton();
 
 		const TINT iNumBones = TINT( pGLTFSkin->joints.size() );
-		const TINT iNumSeq   = TINT( gltfModel.animations.size() );
+		const TINT iNumSeq   = TINT( vecAnimations.Size() );
 
 		pModel->pSkeleton->m_iBoneCount         = iNumBones;
 		pModel->pSkeleton->m_iManualBoneCount   = 0;
@@ -357,7 +381,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		for ( TINT i = 0; i < iNumSeq; i++ )
 		{
 			auto  pSeq        = &pSeqs[ i ];
-			auto& gltfAnim    = gltfModel.animations[ i ];
+			auto& gltfAnim    = gltfModel.animations[ vecAnimations[ i ].first ];
 			auto  strAnimName = TString8( gltfAnim.name.c_str() );
 
 			// Calculate animation duration and find all keys
