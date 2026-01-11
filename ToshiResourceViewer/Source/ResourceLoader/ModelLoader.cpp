@@ -255,7 +255,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 				// Check the name is already in the list
 				TBOOL bDuplicate = TFALSE;
-				for ( TSIZE k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
+				for ( TINT k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
 					bDuplicate = ( vecAnimations[ k ].second.CompareNoCase( strAnimName.c_str() ) == 0 );
 
 				if ( bDuplicate ) continue;
