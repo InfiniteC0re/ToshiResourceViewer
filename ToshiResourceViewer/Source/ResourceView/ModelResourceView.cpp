@@ -351,8 +351,15 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 	ImGui::SameLine();
 
 	ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Export" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
-	if ( ImGui::SmallButton( "Export" ) )
-		ExportScene( "D:\\exported.gltf" );
+	if (ImGui::SmallButton("Export"))
+	{
+		tinygltf::Model gltfModel;
+		ExportScene( gltfModel );
+
+		// Write to the file
+		tinygltf::TinyGLTF gltfWriter;
+		gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
+	}
 
 	// Prepare camera
 	TVector3& oCamTranslation = m_oCamera->GetTranslation();
@@ -564,13 +571,13 @@ void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )
 	pOutTRB->GetSymbols()->Add( pMemStream, "keylib", pTKLHeader.get() );
 }
 
-void ModelResourceView::ExportScene( Toshi::T2StringView pchOutFileName )
+TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 {
 	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
-	if ( !pModel ) return;
+	if ( !pModel ) return TFALSE;
 
-	tinygltf::Model gltfModel;
-	tinygltf::Scene gltfScene;
+	tinygltf::Model& gltfModel = rOutModel;
+	tinygltf::Scene  gltfScene;
 
 	tinygltf::Node gltfRootNode;
 	gltfRootNode.name = m_strFileName.GetString();
@@ -901,10 +908,7 @@ void ModelResourceView::ExportScene( Toshi::T2StringView pchOutFileName )
 	gltfModel.scenes.push_back( std::move( gltfScene ) );
 
 	gltfModel.skins[ 0 ].skeleton = gltfModel.nodes.size() - 1;
-
-	// Write to the file
-	tinygltf::TinyGLTF gltfWriter;
-	gltfWriter.WriteGltfSceneToFile( &gltfModel, pchOutFileName.Get(), TFALSE, TTRUE, TTRUE, TFALSE );
+	return TTRUE;
 }
 
 TBOOL ModelResourceView::TryFixingMissingTKL()

@@ -9,6 +9,8 @@
 #include <Toshi/TDList.h>
 #include <ToshiTools/tinyxml2.h>
 
+#include <tiny_gltf.h>
+
 class ModelResourceView
     : public TRBResourceView
 {
@@ -22,9 +24,9 @@ public:
 	virtual void  OnDestroy() OVERRIDE;
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
-	void OnSaveTKL( PTRB* pOutTRB );
-	void SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
-	void ExportScene( Toshi::T2StringView pchOutFileName );
+	void  OnSaveTKL( PTRB* pOutTRB );
+	void  SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
+	TBOOL ExportScene( tinygltf::Model& rOutModel );
 
 	Toshi::TPString8 GetTKLName();
 	TBOOL            TryFixingMissingTKL();
