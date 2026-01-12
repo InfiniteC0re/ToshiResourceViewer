@@ -253,7 +253,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 
 	auto pTRBWinHeader = pMemStream->Alloc<TTMDWin::TRBWinHeader>();
 	pTRBWinHeader->m_iNumLODs     = pOutTRB->ConvertEndianess( iNumLODs );
-	pTRBWinHeader->m_fLODDistance = pOutTRB->ConvertEndianess( pModel->fLODDistance );
+	pTRBWinHeader->m_fLODDistance = pOutTRB->ConvertEndianess( pModel->aLODDistances[ 0 ] );
 
 	auto pTRBLODs = pMemStream->Alloc<TTMDWin::TRBLODHeader>( iNumLODs );
 	for ( TINT i = 0; i < iNumLODs; i++ )
@@ -927,6 +927,92 @@ TBOOL ModelResourceView::TryFixingMissingTKL()
 	}
 
 	return TTRUE;
+}
+
+void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutput )
+{
+	auto pTMDLElem = pOutput->NewElement( "TMDL" );
+	pOutput->InsertEndChild( pTMDLElem );
+
+	pTMDLElem->SetAttribute( "Target", "Win" );
+	pTMDLElem->SetAttribute( "Name", m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) ).GetString() );
+	pTMDLElem->SetAttribute( "LODCount", m_ModelInstance.pModel->iLODCount );
+	pTMDLElem->SetAttribute( "LODDistance", m_ModelInstance.pModel->aLODDistances[ 0 ] );
+
+	auto pMaterialsElem = pTMDLElem->InsertNewChildElement( "Materials" );
+
+	// Serialize materials
+	T2Map<TPString8, TString8, TPString8::Comparator> mapMaterials;
+	for ( TINT k = 0; k < m_ModelInstance.pModel->iLODCount; k++ )
+	{
+		TString8 strMaterialName;
+		TString8 strTextureName;
+
+		Toshi::TModelLOD* pLOD = &m_ModelInstance.pModel->aLODs[ k ];
+		for ( TINT i = 0; i < pLOD->iNumMeshes; i++ )
+		{
+			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
+			pMesh->GetMaterialInfo( strMaterialName, strTextureName );
+
+			if ( mapMaterials.Find( TPS8D( strMaterialName ) ) == mapMaterials.End() )
+			{
+				// It's the first time we encounter this material
+				mapMaterials.Insert( TPS8D( strMaterialName ), strTextureName );
+			}
+		}
+	}
+
+	T2_FOREACH( mapMaterials, it )
+	{
+		auto pMaterialElem = pMaterialsElem->InsertNewChildElement( "Material" );
+
+		pMaterialElem->SetAttribute( "Name", it->first.GetString() );
+		pMaterialElem->SetAttribute( "Texture", it->second.GetString() );
+	}
+
+	auto pSkeletonElem = pTMDLElem->InsertNewChildElement( "TSkeleton" );
+
+	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
+	TSkeleton*         pSkeleton         = pSkeletonInstance->GetSkeleton();
+
+	const TINT iNumBones = pSkeleton->m_iBoneCount;
+	const TINT iNumSeq   = pSkeleton->m_iSequenceCount;
+
+	// Serialize info about the bones
+	auto pBonesElem = pSkeletonElem->InsertNewChildElement( "Bones" );
+	for ( TINT i = 0; i < iNumBones; i++ )
+	{
+		auto pBone     = &pSkeleton->m_pBones[ i ];
+		auto pBoneElem = pBonesElem->InsertNewChildElement( "Bone" );
+
+		pBoneElem->SetAttribute( "Name", pBone->GetName() );
+		pBoneElem->SetAttribute( "Parent", pBone->GetParentBone() );
+		
+		pBoneElem->SetAttribute( "PosX", pBone->GetPosition().x );
+		pBoneElem->SetAttribute( "PosY", pBone->GetPosition().y );
+		pBoneElem->SetAttribute( "PosZ", pBone->GetPosition().z );
+
+		pBoneElem->SetAttribute( "QuatX", pBone->GetRotation().x );
+		pBoneElem->SetAttribute( "QuatY", pBone->GetRotation().y );
+		pBoneElem->SetAttribute( "QuatZ", pBone->GetRotation().z );
+		pBoneElem->SetAttribute( "QuatW", pBone->GetRotation().w );
+	}
+
+	// Serialize info about the sequences
+	auto pSequencesElem = pSkeletonElem->InsertNewChildElement( "Sequences" );
+	pSequencesElem->SetAttribute( "KeyLibrary", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
+
+	for ( TINT i = 0; i < iNumSeq; i++ )
+	{
+		auto pSeq     = &pSkeleton->m_SkeletonSequences[ i ];
+		auto pSeqElem = pSequencesElem->InsertNewChildElement( "Sequence" );
+
+		pSeqElem->SetAttribute( "Name", pSeq->GetName() );
+		pSeqElem->SetAttribute( "Overlay", pSeq->IsOverlay() );
+		pSeqElem->SetAttribute( "Looped", pSeq->GetMode() == TOSHI_NAMESPACE::TSkeletonSequence::MODE_LOOPED );
+		pSeqElem->SetAttribute( "Duration", pSeq->GetDuration() );
+		pSeqElem->SetAttribute( "Bones", pSeq->m_iNumUsedBones );
+	}
 }
 
 Toshi::TPString8 ModelResourceView::GetTKLName()

@@ -124,10 +124,10 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pMaterials->uiSectionSize );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
 
-	pModel->pTRB              = pTRB;
-	pModel->iLODCount         = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
-	pModel->fLODDistance      = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
-	pModel->bAnimationsLoaded = TFALSE;
+	pModel->pTRB               = pTRB;
+	pModel->iLODCount          = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
+	pModel->aLODDistances[ 0 ] = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
+	pModel->bAnimationsLoaded  = TFALSE;
 
 	if ( pSkeleton )
 	{
@@ -226,8 +226,8 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 	// Initialise the model
 	pModel->pTRB              = NULL;
 	pModel->iLODCount         = 1;
-	pModel->fLODDistance      = 50.0f;
-	pModel->bAnimationsLoaded = TFALSE;
+	pModel->aLODDistances[ 0 ] = 50.0f;
+	pModel->bAnimationsLoaded  = TFALSE;
 
 	// We can't have more than 1 skins on a single model
 	TASSERT( gltfModel.skins.size() <= 1 );

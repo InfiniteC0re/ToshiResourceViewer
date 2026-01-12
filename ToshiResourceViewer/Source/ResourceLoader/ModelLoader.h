@@ -30,8 +30,7 @@ public:
 
 	TINT             iLODCount;
 	Toshi::TModelLOD aLODs[ 5 ];
-	TFLOAT           fLODDistance;
-	TFLOAT           aLODDistances[ 4 ];
+	TFLOAT           aLODDistances[ 5 ];
 
 	TINT                        iNumCollisionMeshes;
 	Toshi::TModelCollisionData* pCollisionMeshes;

@@ -118,7 +118,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 	}
 	else if ( g_pCmd->HasParameter( "-decompile" ) )
 	{
-		auto fnExportModel = [ &strOutputPath ]( const TString8& strFilePath ) -> TPString8 {
+		auto fnExportModel = [ &strOutputPath ]( const TString8& strFilePath, tinyxml2::XMLDocument* pOutInformation ) -> TPString8 {
 			const TINT iLastSlashIndex   = strFilePath.FindReverse( '\\' );
 			TString8   strInputFile      = ( iLastSlashIndex != -1 ) ? TString8( strFilePath.GetString( iLastSlashIndex + 1 ) ) : strFilePath;
 			TString8   strInputFileNoExt = strInputFile.Mid( 0, strInputFile.FindReverse( '.' ) );
@@ -131,6 +131,8 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			ModelResourceView oModelResView;
 			oModelResView.CreateTRB( &oInTRB, pTMDLHeader.get(), "FileHeader", strFilePath.GetString() );
 			if ( !oModelResView.TryFixingMissingTKL() ) return TPS8D( "Unknown" );
+
+			if ( pOutInformation ) oModelResView.SerializeModelInformation( pOutInformation );
 
 			oModelResView.ExportScene( TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), strInputFileNoExt.GetString() ).GetString() );
 			return oModelResView.GetTKLName();
@@ -150,14 +152,25 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			{
 				if ( strCurrentFile.EndsWithNoCase( ".trb" ) )
 				{
+					tinyxml2::XMLDocument oXMLInfo;
+
+					oXMLInfo.InsertEndChild( oXMLInfo.NewDeclaration() );
+					oXMLInfo.InsertEndChild( oXMLInfo.NewComment( "Decompiled with Toshi Resource Viewer" ) );
+
 					TString8  strFullPath = TString8::VarArgs( "%s\\%s", strInputFilePath.GetString(), strCurrentFile.GetString() );
-					TPString8 strTKLName  = fnExportModel( strFullPath );
+					TPString8 strTKLName  = fnExportModel( strFullPath, &oXMLInfo );
 
-					// Add TKL to the list
-					auto itModelList = mapTKLToModels.Find( strTKLName );
-					T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
+					if ( strTKLName != TPS8D( "Unknown" ) )
+					{
+						// Add TKL to the list
+						auto itModelList = mapTKLToModels.Find( strTKLName );
+						T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
 
-					pModelList->PushBack( strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) ) );
+						TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
+						pModelList->PushBack( strModelName );
+
+						oXMLInfo.SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), strModelName.GetString() ) );
+					}
 				}
 
 				bHasFile = pFileSystem->GetNextFile( strCurrentFile );
@@ -181,6 +194,6 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 				pFile->Destroy();
 			}
 		}
-		else fnExportModel( strInputFileName );
+		else fnExportModel( strInputFileName, TNULL );
 	}
 }

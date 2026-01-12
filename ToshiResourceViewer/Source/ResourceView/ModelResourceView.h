@@ -7,6 +7,7 @@
 #include <Render/TTMDWin.h>
 
 #include <Toshi/TDList.h>
+#include <ToshiTools/tinyxml2.h>
 
 class ModelResourceView
     : public TRBResourceView
@@ -27,6 +28,8 @@ public:
 
 	Toshi::TPString8 GetTKLName();
 	TBOOL            TryFixingMissingTKL();
+
+	void SerializeModelInformation( tinyxml2::XMLDocument* pOutput );
 
 private:
 	Toshi::T2FormatString64       m_strAnimationsId;
