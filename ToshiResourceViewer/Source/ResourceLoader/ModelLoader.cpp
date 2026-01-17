@@ -846,10 +846,32 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				vecVertices[ j ].Bones[ 2 ] = bBoneAnimated3 ? ( mapUsedBones[ iBoneIndex3 ]->second * 3 ) : 0;
 				vecVertices[ j ].Bones[ 3 ] = bBoneAnimated4 ? ( mapUsedBones[ iBoneIndex4 ]->second * 3 ) : 0;
 
-				vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? TUINT8( flWeight1 * 255.0f ) : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
-				vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? TUINT8( flWeight2 * 255.0f ) : 0;
-				vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? TUINT8( flWeight3 * 255.0f ) : 0;
-				vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? TUINT8( flWeight4 * 255.0f ) : 0;
+				TUINT8 uiWeight1 = TUINT8( TMath::Round( flWeight1 * 255.0f ) );
+				TUINT8 uiWeight2 = TUINT8( TMath::Round( flWeight2 * 255.0f ) );
+				TUINT8 uiWeight3 = TUINT8( TMath::Round( flWeight3 * 255.0f ) );
+				TUINT8 uiWeight4 = TUINT8( TMath::Round( flWeight4 * 255.0f ) );
+
+				// Normalize weights
+				TUINT16 uiWeightsSum = uiWeight1 + uiWeight2 + uiWeight3 + uiWeight4;
+				if ( uiWeightsSum != 255 )
+				{
+					TUINT8* pMax = &uiWeight1;
+
+					if ( *pMax < uiWeight2 ) pMax = &uiWeight2;
+					if ( *pMax < uiWeight3 ) pMax = &uiWeight3;
+					if ( *pMax < uiWeight4 ) pMax = &uiWeight4;
+
+					// TODO: distribute across all?
+					if ( uiWeightsSum > 255 )
+						*pMax = *pMax - ( uiWeightsSum - 255 );
+					else
+						*pMax = *pMax + ( 255 - uiWeightsSum );
+				}
+
+				vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? uiWeight1 : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
+				vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? uiWeight2 : 0;
+				vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? uiWeight3 : 0;
+				vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? uiWeight4 : 0;
 
 				j += 1;
 			}
