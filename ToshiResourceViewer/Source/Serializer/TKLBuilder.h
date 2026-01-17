@@ -6,7 +6,7 @@
 class TKLBuilder
 {
 public:
-	TKLBuilder()  = default;
+	TKLBuilder();
 	~TKLBuilder() = default;
 
 	TINT AddTranslation( const Toshi::TAnimVector& rcTranslation );
@@ -25,4 +25,6 @@ private:
 	Toshi::T2DynamicVector<Toshi::TAnimVector>     m_vecTranslations;
 	Toshi::T2DynamicVector<Toshi::TAnimQuaternion> m_vecRotations;
 	Toshi::T2DynamicVector<Toshi::TAnimScale>      m_vecScales;
+
+	TBOOL m_bCompress;
 };
