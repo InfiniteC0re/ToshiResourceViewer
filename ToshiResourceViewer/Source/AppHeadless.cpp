@@ -290,7 +290,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 					auto itBones      = itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
 					auto itOtherBones = itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
 
-					auto itBone       = itBones->FirstChildElement( "Bone" );
+					auto itBone = itBones->FirstChildElement( "Bone" );
 					for ( TSIZE i = 0; bSame && i < iNumBones; i++ )
 					{
 						TBOOL bFoundBone  = TFALSE;

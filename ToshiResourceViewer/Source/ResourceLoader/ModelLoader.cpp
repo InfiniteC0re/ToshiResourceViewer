@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ModelLoader.h"
 #include "Shader/SkinShader.h"
+#include "Shader/WorldShader.h"
 #include "Resource/StreamedTexture.h"
 #include "NvTriStrip/NvTriStrip.h"
 #include "Application.h"
@@ -55,7 +56,7 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 		T2FormatString128 symbolName;
 		symbolName.Format( "LOD%d_Mesh_%d", iIndex, i );
 
-		auto pTRBMesh = pTRB->GetSymbols()->Find<TTMDWin::TRBLODMesh>( pTRB->GetSections(), symbolName.Get() );
+		auto pTRBMesh = pTRB->GetSymbols()->Find<TTMDWin::TRBMeshLODHeader>( pTRB->GetSections(), symbolName.Get() );
 
 		if ( !pTRBMesh )
 			continue;
@@ -112,8 +113,200 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 	}
 }
 
-T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( PTRB* pTRB, Endianess eEndianess )
+//-----------------------------------------------------------------------------
+// World model TRB binary structure definitions
+// Mirrors OpenBarnyard/Source/World/AWorld.h (non-E3_2006_COMPATIBILITY layout)
+//-----------------------------------------------------------------------------
+namespace WorldTRB
 {
+	struct CellMesh
+	{
+		Toshi::TMesh* pMesh;
+		TUINT32       uiNumIndices;
+		TUINT32       uiNumVertices1;
+		TUINT16       uiNumVertices2;
+		TCHAR*        szMaterialName;
+		void*         pVertices;    // WorldMesh::WorldVertex*
+		TUINT16*      pIndices;
+	};
+
+	struct CellMeshSphere
+	{
+		Toshi::TSphere m_BoundingSphere;
+		CellMesh*      m_pCellMesh;
+	};
+
+	struct CellSphereTreeLeafNode
+	{
+		TUINT32 m_uiNumMeshes;
+
+		TUINT16& GetMeshIndex( TUINT32 a_uiIndex )
+		{
+			TASSERT( a_uiIndex < m_uiNumMeshes );
+			return *( (TUINT16*)( this + 1 ) + a_uiIndex );
+		}
+	};
+
+	struct CellSphereTreeBranchNode
+	{
+		Toshi::TSphere            m_BoundingSphere;
+		CellSphereTreeBranchNode* m_pRight;
+
+		TBOOL IsLeaf() const { return m_pRight == TNULL; }
+
+		CellSphereTreeLeafNode* GetLeafNode()
+		{
+			TASSERT( IsLeaf() );
+			return (CellSphereTreeLeafNode*)( this + 1 );
+		}
+
+		CellSphereTreeBranchNode* GetSubNode()
+		{
+			TASSERT( !IsLeaf() );
+			return (CellSphereTreeBranchNode*)( this + 1 );
+		}
+	};
+
+	struct Cell
+	{
+		TUINT                     uiFlags;
+		TCHAR                     UNKNOWNDATA1[ 108 ];
+		TINT                      m_iSomeCount;
+		TCHAR                     UNKNOWNDATA2[ 12 ];
+		void*                     pNode;
+		TUINT32                   uiNumMeshes;
+		CellMeshSphere**          ppCellMeshSpheres;
+		CellSphereTreeBranchNode* pTreeBranchNodes;
+	};
+
+	struct World
+	{
+		TINT32  m_iNumCells;
+		Cell**  m_ppCells;
+	};
+
+	struct WorldDatabase
+	{
+		TUINT32  m_uiNumWorlds;
+		World**  m_ppWorlds;
+	};
+}
+
+static TUINT s_iWorldMeshIndex = 0;
+
+static void ModelLoader_LoadWorldTreeIntersect(
+    PTRB*                                    pTRB,
+    ResourceLoader::Model*                   pModel,
+    WorldTRB::CellSphereTreeBranchNode*      a_pNode,
+    WorldTRB::Cell*                          a_pCell,
+    TModelLOD&                               rOutLOD
+)
+{
+	auto pNode = a_pNode;
+
+	// Traverse non-leaf nodes: recurse left, iterate right spine
+	while ( !pNode->IsLeaf() )
+	{
+		ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pNode->GetSubNode(), a_pCell, rOutLOD );
+		pNode = pNode->m_pRight;
+	}
+
+	TASSERT( pNode->IsLeaf() );
+	auto pLeafNode = pNode->GetLeafNode();
+
+	for ( TUINT i = 0; i < pLeafNode->m_uiNumMeshes; i++ )
+	{
+		TASSERT( s_iWorldMeshIndex < TUINT( rOutLOD.iNumMeshes ) );
+		if ( s_iWorldMeshIndex >= TUINT( rOutLOD.iNumMeshes ) )
+			break;
+
+		auto pCellMeshSphere = a_pCell->ppCellMeshSpheres[ pLeafNode->GetMeshIndex( i ) ];
+		auto pTerrainMesh    = pCellMeshSphere->m_pCellMesh;
+
+		WorldMesh*     pMesh     = g_pWorldShader->CreateMesh();
+		WorldMaterial* pMaterial = g_pWorldShader->CreateMaterial();
+
+		// Look up texture for this material
+		auto pMatInfo = FindMaterialInModel( pTerrainMesh->szMaterialName );
+		if ( pMatInfo )
+		{
+			auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pMatInfo->szTextureFile ) );
+			pMaterial->SetTexture( pTexture );
+			pModel->vecUsedTextures.PushBack( pTexture );
+		}
+
+		pMaterial->SetName( pTerrainMesh->szMaterialName );
+
+		pMesh->SetName( pTerrainMesh->szMaterialName );
+		pMesh->SetMaterialName( pTerrainMesh->szMaterialName );
+		pMesh->SetMaterial( pMaterial );
+
+		rOutLOD.ppMeshes[ s_iWorldMeshIndex++ ] = pMesh;
+
+		// Upload vertex data to GL
+		if ( pTerrainMesh->uiNumVertices1 > 0 && pTerrainMesh->pVertices != TNULL )
+		{
+			pMesh->oVertexBuffer = T2Render::CreateVertexBuffer(
+			    pTerrainMesh->pVertices,
+			    pTerrainMesh->uiNumVertices1 * sizeof( WorldMesh::WorldVertex ),
+			    GL_STATIC_DRAW
+			);
+		}
+
+		// Create submesh: index buffer + VAO with WorldVertex attribute layout
+		if ( pTerrainMesh->uiNumIndices > 0 && pTerrainMesh->pIndices != TNULL )
+		{
+			auto& subMesh         = pMesh->vecSubMeshes.PushBack();
+			subMesh.uiNumIndices  = pTerrainMesh->uiNumIndices;
+			subMesh.uiNumVertices = pTerrainMesh->uiNumVertices1;
+
+			T2VertexArray::Unbind();
+
+			subMesh.oIndexBuffer = T2Render::CreateIndexBuffer(
+			    pTerrainMesh->pIndices, pTerrainMesh->uiNumIndices, GL_STATIC_DRAW
+			);
+			subMesh.oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, subMesh.oIndexBuffer );
+			subMesh.oVertexArray.Bind();
+			subMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Position ) );
+			subMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Normal ) );
+			subMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Color ) );
+			subMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 2, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, UV ) );
+		}
+	}
+}
+
+static void ModelLoader_LoadWorldLOD_Barnyard_Windows( PTRB* pTRB, ResourceLoader::Model* pModel, TModelLOD& rOutLOD )
+{
+	s_iWorldMeshIndex = 0;
+
+	auto pDatabase = pTRB->GetSymbols()->Find<WorldTRB::WorldDatabase>( pTRB->GetSections(), "Database" );
+	if ( !pDatabase )
+	{
+		TASSERT( !"World model TRB is missing Database symbol" );
+		return;
+	}
+
+	for ( TUINT i = 0; i < pDatabase->m_uiNumWorlds; i++ )
+	{
+		auto pWorld = pDatabase->m_ppWorlds[ i ];
+
+		for ( TINT k = 0; k < pWorld->m_iNumCells; k++ )
+		{
+			auto pCell = pWorld->m_ppCells[ k ];
+			if ( pCell->pTreeBranchNodes )
+				ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pCell->pTreeBranchNodes, pCell, rOutLOD );
+		}
+	}
+
+	// Shrink the mesh count to the number actually loaded so the destructor doesn't
+	// try to destroy uninitialized entries in the remainder of ppMeshes
+	rOutLOD.iNumMeshes = TINT( s_iWorldMeshIndex );
+}
+
+T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( PTRB* pTRB, ModelType eModelType )
+{
+	const Endianess eEndianess = pTRB->GetEndianess();
+
 	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
 
 	auto pHeader         = pTRB->GetSymbols()->Find<TTMDWin::TRBWinHeader>( pTRB->GetSections(), "Header" );
@@ -121,12 +314,12 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	auto pSkeletonHeader = pTRB->GetSymbols()->Find<TTMDBase::SkeletonHeader>( pTRB->GetSections(), "SkeletonHeader" );
 	auto pSkeleton       = pTRB->GetSymbols()->Find<TSkeleton>( pTRB->GetSections(), "Skeleton" );
 
-	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pMaterials->uiSectionSize );
+	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pTRB->ConvertEndianess( pMaterials->uiSectionSize ) );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
 
 	pModel->pTRB               = pTRB;
-	pModel->iLODCount          = CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs );
-	pModel->aLODDistances[ 0 ] = CONVERTENDIANESS( eEndianess, pHeader->m_fLODDistance );
+	pModel->iLODCount          = pTRB->ConvertEndianess( pHeader->m_iNumLODs );
+	pModel->aLODDistances[ 0 ] = pTRB->ConvertEndianess( pHeader->m_fLODDistance );
 	pModel->bAnimationsLoaded  = TFALSE;
 
 	if ( pSkeleton )
@@ -135,8 +328,8 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 		
 		TUtil::MemCopy( pModel->pSkeleton, pSkeleton.get(), sizeof( TSkeleton ) );
 
-		pModel->pSkeleton->m_pBones = new TSkeletonBone[ pSkeleton->m_iBoneCount ];
-		TUtil::MemCopy( pModel->pSkeleton->m_pBones, pSkeleton->m_pBones, sizeof( TSkeletonBone ) * pSkeleton->m_iBoneCount );
+		pModel->pSkeleton->m_pBones = new TSkeletonBone[ pTRB->ConvertEndianess( pSkeleton->m_iBoneCount ) ];
+		TUtil::MemCopy( pModel->pSkeleton->m_pBones, pSkeleton->m_pBones, sizeof( TSkeletonBone ) * pTRB->ConvertEndianess( pSkeleton->m_iBoneCount ) );
 
 		pModel->pSkeleton->m_SkeletonSequences = new TSkeletonSequence[ pSkeleton->m_iSequenceCount ];
 
@@ -171,24 +364,23 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 		Model_PrepareAnimations( pModel );
 	}
 
-	for ( TINT i = 0; i < CONVERTENDIANESS( eEndianess, pHeader->m_iNumLODs ); i++ )
+	for ( TINT i = 0; i < pTRB->ConvertEndianess( pHeader->m_iNumLODs ); i++ )
 	{
 		auto pTRBLod = pHeader->GetLOD( i );
 		
-		pModel->aLODs[ i ].iNumMeshes      = CONVERTENDIANESS( eEndianess, pTRBLod->m_iMeshCount1 ) + CONVERTENDIANESS( eEndianess, pTRBLod->m_iMeshCount2 );
-		pModel->aLODs[ i ].ppMeshes        = new TMesh*[ pModel->aLODs[ i ].iNumMeshes ];
-		pModel->aLODs[ i ].BoundingSphere  = pTRBLod->m_RenderVolume;
+		pModel->aLODs[ i ].iNumMeshes      = pTRB->ConvertEndianess( pTRBLod->m_iMeshCount1 ) + pTRB->ConvertEndianess( pTRBLod->m_iMeshCount2 );
+		pModel->aLODs[ i ].ppMeshes        = new TMesh*[ pModel->aLODs[ i ].iNumMeshes ]();  // zero-initialise
+		pModel->aLODs[ i ].BoundingSphere  = pTRB->ConvertEndianess( pTRBLod->m_RenderVolume );
 
-		switch ( pTRBLod->m_eShader )
+		switch ( pTRB->ConvertEndianess( pTRBLod->m_eShader ) )
 		{
-			case TTMDWin::ST_WORLD:
-				//LoadWorldMeshTRB( a_pModel, i, &a_pModel->m_LODs[ i ], pTRBLod );
+			case TTMDBase::SHADERTYPE_GRASS:
+			case TTMDBase::SHADERTYPE_WORLD:
+				ModelLoader_LoadWorldLOD_Barnyard_Windows( pTRB, pModel, pModel->aLODs[ i ] );
 				break;
-			case TTMDWin::ST_SKIN:
+			case TTMDBase::SHADERTYPE_FOB:
+			case TTMDBase::SHADERTYPE_SKIN:
 				ModelLoader_LoadSkinLOD_Barnyard_Windows( pTRB, eEndianess, pModel, i, pModel->aLODs[ i ], *pTRBLod );
-				break;
-			case TTMDWin::ST_GRASS:
-				//LoadGrassMeshTRB( a_pModel, i, &a_pModel->m_LODs[ i ], pTRBLod );
 				break;
 			default:
 				TASSERT( !"The model is using an unknown shader" );
@@ -986,7 +1178,8 @@ ResourceLoader::Model::~Model()
 		{
 			for ( TINT k = 0; k < aLODs[ i ].iNumMeshes; k++ )
 			{
-				aLODs[ i ].ppMeshes[ k ]->DestroyResource();
+				if ( aLODs[ i ].ppMeshes[ k ] )
+					aLODs[ i ].ppMeshes[ k ]->DestroyResource();
 			}
 
 			delete[] aLODs[ i ].ppMeshes;

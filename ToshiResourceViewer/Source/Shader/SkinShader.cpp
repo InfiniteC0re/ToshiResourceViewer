@@ -442,7 +442,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	return TTRUE;
 }
 
-TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<Toshi::TTMDWin::TRBLODMesh> a_pTRBMesh )
+TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<Toshi::TTMDWin::TRBMeshLODHeader> a_pTRBMesh )
 {
 	auto pMemStream = a_pTRBMesh.stack();
 
@@ -536,7 +536,7 @@ TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<
 		// Vertex buffer is allocated only for the first mesh
 		if ( bAllocateVertexBuffer )
 		{
-			auto pTRBVertices = pMemStream->Alloc<TTMDWin::SkinVertex>( &pTRBSubMesh->m_pVertices, uiNumTotalVertices );
+			auto pTRBVertices = pMemStream->Alloc<TTMDWin::Vertex>( &pTRBSubMesh->m_pVertices, uiNumTotalVertices );
 
 			for ( TUINT k = 0; k < uiNumTotalVertices; k++ )
 			{

@@ -10,7 +10,7 @@ workspace "ToshiResourceViewer"
 	
 	startproject "ToshiResourceViewer"
 
-	platforms "Windows"
+	platforms "Win32"
 	configurations { "Debug", "Release", "Final" }
 
 	disablewarnings { "4996" }

@@ -669,7 +669,7 @@ struct IGFD_API FileDialogConfig {
     std::string filePathName;                                // if not empty, the filename and the path will be obtained from filePathName
     int32_t countSelectionMax  = 1;                          // count selection max, 0 for infinite
     UserDatas userDatas        = nullptr;                    // user datas (can be retrieved in pane)
-    ImGuiFileDialogFlags flags = ImGuiFileDialogFlags_None;  // ImGuiFileDialogFlags
+    ImGuiFileDialogFlags flags = ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering;  // ImGuiFileDialogFlags
     PaneFun sidePane;                                        // side pane callback
     float sidePaneWidth = 250.0f;                            // side pane width
     UserFileAttributesFun userFileAttributes;                // user file Attibutes callback

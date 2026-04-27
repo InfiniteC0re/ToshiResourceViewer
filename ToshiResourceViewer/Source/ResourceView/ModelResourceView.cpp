@@ -57,17 +57,30 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	else
 	{
 		// Create from TRB
+		const TBOOL bIsSkinModel  = ( m_strSymbolName == "FileHeader" );
+		const TBOOL bIsWorldModel = ( m_strSymbolName == "Database" );
 
 		// Skinned mesh
-		if ( m_strSymbolName == "FileHeader" )
+		if ( bIsSkinModel || bIsWorldModel )
 		{
-			TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
+			ResourceLoader::ModelType eModelType = ResourceLoader::ModelType::World;
 
-			if ( pFileHeader->m_uiMagic != TFourCC( "TMDL" ) &&
-				 pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
+			if ( bIsSkinModel )
+			{
+				TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
+
+				if ( pFileHeader->m_uiMagic != TFourCC( "TMDL" ) &&
+					 pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
+					return TFALSE;
+
+				eModelType = ResourceLoader::ModelType::Skin;
+			}
+			else if ( !m_pData )
+			{
 				return TFALSE;
+			}
 
-			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, m_pTRB->GetEndianess() ), m_ModelInstance );
+			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, eModelType ), m_ModelInstance );
 		}
 	}
 
@@ -263,7 +276,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 
 		pTRBLOD->m_iMeshCount1 = pOutTRB->ConvertEndianess( pLOD->iNumMeshes );
 		pTRBLOD->m_iMeshCount2 = pOutTRB->ConvertEndianess( 0 );
-		pTRBLOD->m_eShader     = pOutTRB->ConvertEndianess( TTMDWin::ST_SKIN );
+		pTRBLOD->m_eShader     = pOutTRB->ConvertEndianess( TTMDBase::SHADERTYPE_SKIN );
 		pTRBLOD->m_RenderVolume.Set(
 		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().x ),
 		    pOutTRB->ConvertEndianess( pLOD->BoundingSphere.AsVector4().y ),
@@ -283,7 +296,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 		for ( TINT k = 0; k < iMeshCount; k++ )
 		{
 			Mesh* pMesh       = TSTATICCAST( Mesh, pLOD->ppMeshes[ k ] );
-			auto  pTRBLODMesh = pMemStream->Alloc<TTMDWin::TRBLODMesh>();
+			auto  pTRBLODMesh = pMemStream->Alloc<TTMDWin::TRBMeshLODHeader>();
 
 			// Serialize TRB Mesh
 			TBOOL bSerializeResult = pMesh->SerializeTRBMesh( pOutTRB, pTRBLODMesh );
@@ -907,7 +920,9 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 	gltfScene.nodes.push_back( gltfModel.nodes.size() - 1 );
 	gltfModel.scenes.push_back( std::move( gltfScene ) );
 
-	gltfModel.skins[ 0 ].skeleton = gltfModel.nodes.size() - 1;
+	if ( gltfModel.skins.size() > 0 )
+		gltfModel.skins[ 0 ].skeleton = gltfModel.nodes.size() - 1;
+
 	return TTRUE;
 }
 

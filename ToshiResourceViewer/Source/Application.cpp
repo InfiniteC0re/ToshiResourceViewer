@@ -12,6 +12,7 @@
 #include "ResourceView/ModelResourceView.h"
 #include "TRB/TRBWindowManager.h"
 #include "Shader/SkinShader.h"
+#include "Shader/WorldShader.h"
 #include "AppHeadless.h"
 
 #include <Toshi/Toshi.h>
@@ -73,8 +74,9 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 1 );
 	SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 16 );
 
-	TOrderTable::CreateStaticData( 2000, 4000 );
+	TOrderTable::CreateStaticData( 4000, 4000 );
 	SkinShader::CreateSingleton()->Create();
+	WorldShader::CreateSingleton()->Create();
 
 	TRBWindowManager::CreateSingleton();
 
