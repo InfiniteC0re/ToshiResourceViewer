@@ -194,12 +194,26 @@ namespace WorldTRB
 
 static TUINT s_iWorldMeshIndex = 0;
 
+using WorldMatCache = T2DynamicVector<T2Pair<TString8, WorldMaterial*>>;
+
+static WorldMaterial* WorldMatCache_Find( WorldMatCache& rCache, const TCHAR* szName )
+{
+	T2_FOREACH( rCache, it )
+	{
+		if ( TStringManager::String8CompareNoCase( it->first.GetString(), szName ) == 0 )
+			return it->second;
+	}
+
+	return TNULL;
+}
+
 static void ModelLoader_LoadWorldTreeIntersect(
     PTRB*                                    pTRB,
     ResourceLoader::Model*                   pModel,
     WorldTRB::CellSphereTreeBranchNode*      a_pNode,
     WorldTRB::Cell*                          a_pCell,
-    TModelLOD&                               rOutLOD
+    TModelLOD&                               rOutLOD,
+    WorldMatCache&                           rMatCache
 )
 {
 	auto pNode = a_pNode;
@@ -207,7 +221,7 @@ static void ModelLoader_LoadWorldTreeIntersect(
 	// Traverse non-leaf nodes: recurse left, iterate right spine
 	while ( !pNode->IsLeaf() )
 	{
-		ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pNode->GetSubNode(), a_pCell, rOutLOD );
+		ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pNode->GetSubNode(), a_pCell, rOutLOD, rMatCache );
 		pNode = pNode->m_pRight;
 	}
 
@@ -224,18 +238,24 @@ static void ModelLoader_LoadWorldTreeIntersect(
 		auto pTerrainMesh    = pCellMeshSphere->m_pCellMesh;
 
 		WorldMesh*     pMesh     = g_pWorldShader->CreateMesh();
-		WorldMaterial* pMaterial = g_pWorldShader->CreateMaterial();
+		WorldMaterial* pMaterial = WorldMatCache_Find( rMatCache, pTerrainMesh->szMaterialName );
 
-		// Look up texture for this material
-		auto pMatInfo = FindMaterialInModel( pTerrainMesh->szMaterialName );
-		if ( pMatInfo )
+		if ( !pMaterial )
 		{
-			auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pMatInfo->szTextureFile ) );
-			pMaterial->SetTexture( pTexture );
-			pModel->vecUsedTextures.PushBack( pTexture );
-		}
+			pMaterial = g_pWorldShader->CreateMaterial();
 
-		pMaterial->SetName( pTerrainMesh->szMaterialName );
+			auto pMatInfo = FindMaterialInModel( pTerrainMesh->szMaterialName );
+			if ( pMatInfo )
+			{
+				auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pMatInfo->szTextureFile ) );
+				pMaterial->SetTexture( pTexture );
+				pModel->vecUsedTextures.PushBack( pTexture );
+			}
+
+			pMaterial->SetName( pTerrainMesh->szMaterialName );
+			rMatCache.PushBack( { TString8( pTerrainMesh->szMaterialName ), pMaterial } );
+			pModel->vecOwnedMaterials.PushBack( pMaterial );
+		}
 
 		pMesh->SetName( pTerrainMesh->szMaterialName );
 		pMesh->SetMaterialName( pTerrainMesh->szMaterialName );
@@ -278,6 +298,7 @@ static void ModelLoader_LoadWorldTreeIntersect(
 static void ModelLoader_LoadWorldLOD_Barnyard_Windows( PTRB* pTRB, ResourceLoader::Model* pModel, TModelLOD& rOutLOD )
 {
 	s_iWorldMeshIndex = 0;
+	WorldMatCache matCache;
 
 	auto pDatabase = pTRB->GetSymbols()->Find<WorldTRB::WorldDatabase>( pTRB->GetSections(), "Database" );
 	if ( !pDatabase )
@@ -294,7 +315,7 @@ static void ModelLoader_LoadWorldLOD_Barnyard_Windows( PTRB* pTRB, ResourceLoade
 		{
 			auto pCell = pWorld->m_ppCells[ k ];
 			if ( pCell->pTreeBranchNodes )
-				ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pCell->pTreeBranchNodes, pCell, rOutLOD );
+				ModelLoader_LoadWorldTreeIntersect( pTRB, pModel, pCell->pTreeBranchNodes, pCell, rOutLOD, matCache );
 		}
 	}
 
@@ -317,6 +338,7 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pTRB->ConvertEndianess( pMaterials->uiSectionSize ) );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
 
+	pModel->eModelType         = eModelType;
 	pModel->pTRB               = pTRB;
 	pModel->iLODCount          = pTRB->ConvertEndianess( pHeader->m_iNumLODs );
 	pModel->aLODDistances[ 0 ] = pTRB->ConvertEndianess( pHeader->m_fLODDistance );
@@ -364,6 +386,8 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 		Model_PrepareAnimations( pModel );
 	}
 
+	ModelType eFiguredOutModelType = ModelType::None;
+
 	for ( TINT i = 0; i < pTRB->ConvertEndianess( pHeader->m_iNumLODs ); i++ )
 	{
 		auto pTRBLod = pHeader->GetLOD( i );
@@ -371,6 +395,26 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 		pModel->aLODs[ i ].iNumMeshes      = pTRB->ConvertEndianess( pTRBLod->m_iMeshCount1 ) + pTRB->ConvertEndianess( pTRBLod->m_iMeshCount2 );
 		pModel->aLODs[ i ].ppMeshes        = new TMesh*[ pModel->aLODs[ i ].iNumMeshes ]();  // zero-initialise
 		pModel->aLODs[ i ].BoundingSphere  = pTRB->ConvertEndianess( pTRBLod->m_RenderVolume );
+
+		switch ( pTRB->ConvertEndianess( pTRBLod->m_eShader ) )
+		{
+			case TTMDBase::SHADERTYPE_GRASS:
+				TASSERT( eFiguredOutModelType == ModelType::None || eFiguredOutModelType == ModelType::Grass );
+				eFiguredOutModelType = ModelType::Grass;
+				break;
+			case TTMDBase::SHADERTYPE_WORLD:
+				TASSERT( eFiguredOutModelType == ModelType::None || eFiguredOutModelType == ModelType::World );
+				eFiguredOutModelType = ModelType::World;
+				break;
+			case TTMDBase::SHADERTYPE_FOB:
+				TASSERT( eFiguredOutModelType == ModelType::None || eFiguredOutModelType == ModelType::FOB );
+				eFiguredOutModelType = ModelType::FOB;
+				break;
+			case TTMDBase::SHADERTYPE_SKIN:
+				TASSERT( eFiguredOutModelType == ModelType::None || eFiguredOutModelType == ModelType::Skin );
+				eFiguredOutModelType = ModelType::Skin;
+				break;
+		}
 
 		switch ( pTRB->ConvertEndianess( pTRBLod->m_eShader ) )
 		{
@@ -388,6 +432,8 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 				break;
 		}
 	}
+
+	pModel->eModelType = eFiguredOutModelType;
 
 	return pModel;
 }
@@ -416,8 +462,9 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 	}
 
 	// Initialise the model
-	pModel->pTRB              = NULL;
-	pModel->iLODCount         = 1;
+	pModel->eModelType         = ModelType::Skin;
+	pModel->pTRB               = NULL;
+	pModel->iLODCount          = 1;
 	pModel->aLODDistances[ 0 ] = 50.0f;
 	pModel->bAnimationsLoaded  = TFALSE;
 
@@ -1168,6 +1215,8 @@ ResourceLoader::Model::Model()
 	pSkeleton           = TNULL;
 	pCollisionMeshes    = TNULL;
 	pTRB                = TNULL;
+
+	eModelType = ModelType::None;
 }
 
 ResourceLoader::Model::~Model()
@@ -1185,6 +1234,9 @@ ResourceLoader::Model::~Model()
 			delete[] aLODs[ i ].ppMeshes;
 		}
 	}
+
+	for ( TINT i = 0; i < vecOwnedMaterials.Size(); i++ )
+		delete vecOwnedMaterials[ i ];
 
 	if ( pSkeleton )
 	{

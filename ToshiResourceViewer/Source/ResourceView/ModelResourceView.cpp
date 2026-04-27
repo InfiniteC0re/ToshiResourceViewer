@@ -379,6 +379,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 	m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
 	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
+	m_oCamera.SetFarPlane( 2000.0f );
 
 	// Arcball camera behaviour
 	TMatrix44 oCameraMatrix;
@@ -955,6 +956,7 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 
 	pTMDLElem->SetAttribute( "Target", "Win" );
 	pTMDLElem->SetAttribute( "Name", m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) ).GetString() );
+	pTMDLElem->SetAttribute( "Type", ResourceLoader::GetModelTypeName( m_ModelInstance.pModel->eModelType ) );
 	pTMDLElem->SetAttribute( "LODCount", m_ModelInstance.pModel->iLODCount );
 	pTMDLElem->SetAttribute( "LODDistance", m_ModelInstance.pModel->aLODDistances[ 0 ] );
 
@@ -990,47 +992,48 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 	}
 
 	auto pSkeletonElem = pTMDLElem->InsertNewChildElement( "TSkeleton" );
-
-	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
-	TSkeleton*         pSkeleton         = pSkeletonInstance->GetSkeleton();
-
-	const TINT iNumBones = pSkeleton->m_iBoneCount;
-	const TINT iNumSeq   = pSkeleton->m_iSequenceCount;
-
-	// Serialize info about the bones
-	auto pBonesElem = pSkeletonElem->InsertNewChildElement( "Bones" );
-	for ( TINT i = 0; i < iNumBones; i++ )
+	if ( TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance )
 	{
-		auto pBone     = &pSkeleton->m_pBones[ i ];
-		auto pBoneElem = pBonesElem->InsertNewChildElement( "Bone" );
+		TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
 
-		pBoneElem->SetAttribute( "Name", pBone->GetName() );
-		pBoneElem->SetAttribute( "Parent", pBone->GetParentBone() );
-		
-		pBoneElem->SetAttribute( "PosX", pBone->GetPosition().x );
-		pBoneElem->SetAttribute( "PosY", pBone->GetPosition().y );
-		pBoneElem->SetAttribute( "PosZ", pBone->GetPosition().z );
+		const TINT iNumBones = pSkeleton->m_iBoneCount;
+		const TINT iNumSeq   = pSkeleton->m_iSequenceCount;
 
-		pBoneElem->SetAttribute( "QuatX", pBone->GetRotation().x );
-		pBoneElem->SetAttribute( "QuatY", pBone->GetRotation().y );
-		pBoneElem->SetAttribute( "QuatZ", pBone->GetRotation().z );
-		pBoneElem->SetAttribute( "QuatW", pBone->GetRotation().w );
-	}
+		// Serialize info about the bones
+		auto pBonesElem = pSkeletonElem->InsertNewChildElement( "Bones" );
+		for ( TINT i = 0; i < iNumBones; i++ )
+		{
+			auto pBone     = &pSkeleton->m_pBones[ i ];
+			auto pBoneElem = pBonesElem->InsertNewChildElement( "Bone" );
 
-	// Serialize info about the sequences
-	auto pSequencesElem = pSkeletonElem->InsertNewChildElement( "Sequences" );
-	pSequencesElem->SetAttribute( "KeyLibrary", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
+			pBoneElem->SetAttribute( "Name", pBone->GetName() );
+			pBoneElem->SetAttribute( "Parent", pBone->GetParentBone() );
 
-	for ( TINT i = 0; i < iNumSeq; i++ )
-	{
-		auto pSeq     = &pSkeleton->m_SkeletonSequences[ i ];
-		auto pSeqElem = pSequencesElem->InsertNewChildElement( "Sequence" );
+			pBoneElem->SetAttribute( "PosX", pBone->GetPosition().x );
+			pBoneElem->SetAttribute( "PosY", pBone->GetPosition().y );
+			pBoneElem->SetAttribute( "PosZ", pBone->GetPosition().z );
 
-		pSeqElem->SetAttribute( "Name", pSeq->GetName() );
-		pSeqElem->SetAttribute( "Overlay", pSeq->IsOverlay() );
-		pSeqElem->SetAttribute( "Looped", pSeq->GetMode() == TOSHI_NAMESPACE::TSkeletonSequence::MODE_LOOPED );
-		pSeqElem->SetAttribute( "Duration", pSeq->GetDuration() );
-		pSeqElem->SetAttribute( "Bones", pSeq->m_iNumUsedBones );
+			pBoneElem->SetAttribute( "QuatX", pBone->GetRotation().x );
+			pBoneElem->SetAttribute( "QuatY", pBone->GetRotation().y );
+			pBoneElem->SetAttribute( "QuatZ", pBone->GetRotation().z );
+			pBoneElem->SetAttribute( "QuatW", pBone->GetRotation().w );
+		}
+
+		// Serialize info about the sequences
+		auto pSequencesElem = pSkeletonElem->InsertNewChildElement( "Sequences" );
+		pSequencesElem->SetAttribute( "KeyLibrary", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
+
+		for ( TINT i = 0; i < iNumSeq; i++ )
+		{
+			auto pSeq     = &pSkeleton->m_SkeletonSequences[ i ];
+			auto pSeqElem = pSequencesElem->InsertNewChildElement( "Sequence" );
+
+			pSeqElem->SetAttribute( "Name", pSeq->GetName() );
+			pSeqElem->SetAttribute( "Overlay", pSeq->IsOverlay() );
+			pSeqElem->SetAttribute( "Looped", pSeq->GetMode() == TOSHI_NAMESPACE::TSkeletonSequence::MODE_LOOPED );
+			pSeqElem->SetAttribute( "Duration", pSeq->GetDuration() );
+			pSeqElem->SetAttribute( "Bones", pSeq->m_iNumUsedBones );
+		}
 	}
 }
 

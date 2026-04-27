@@ -205,9 +205,6 @@ TBOOL WorldMesh::Render()
 void WorldMesh::OnDestroy()
 {
 	BaseClass::OnDestroy();
-
-	delete m_pMaterial;
-	m_pMaterial = TNULL;
 }
 
 TBOOL WorldMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, TSkeletonInstance* a_pSkeletonInstance )

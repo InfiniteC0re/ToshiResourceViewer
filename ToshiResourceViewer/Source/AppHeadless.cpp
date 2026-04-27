@@ -18,6 +18,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 {
 	const TBOOL bCompress        = g_pCmd->HasParameter( "-compress" );
 	const TBOOL bSkinned         = g_pCmd->HasParameter( "-skinned" );
+	const TBOOL bMerge           = g_pCmd->HasParameter( "-merge" );
 	TString8    strOutputPath    = g_pCmd->GetParameterValue( "-output" );
 	TString8    strInputFilePath = g_pCmd->GetParameterValue( "-input" );
 
@@ -152,10 +153,11 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			// Only skinned models are supported atm
 			PTRB oInTRB( strFilePath.GetString() );
 			auto pTMDLHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" );
-			if ( !pTMDLHeader ) return TPString8();
+			auto pDatabaseHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" );
+			if ( !pTMDLHeader && !pDatabaseHeader ) return TPString8();
 
 			ModelResourceView oModelResView;
-			oModelResView.CreateTRB( &oInTRB, pTMDLHeader.get(), "FileHeader", strFilePath.GetString() );
+			oModelResView.CreateTRB( &oInTRB, pTMDLHeader ? pTMDLHeader.get() : pDatabaseHeader.get(), pTMDLHeader ? "FileHeader" : "Database", strFilePath.GetString() );
 			if ( !oModelResView.TryFixingMissingTKL() ) return TPString8();
 
 			oModelResView.SerializeModelInformation( pModelCursor->pXML );
@@ -165,6 +167,8 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			{
 				// Write model to the file
 				gltfWriter.WriteGltfSceneToFile( pModelCursor->pGLTFModel, TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), strInputFileNoExt.GetString() ).GetString(), TFALSE, TTRUE, TTRUE, TFALSE );
+
+				pModelCursor->pXML->SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), strInputFileNoExt.GetString() ) );
 
 				fnMoveCursor();
 				return oModelResView.GetTKLName();
@@ -199,8 +203,6 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 						TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
 						pModelList->PushBack( strModelName );
-
-						//pXMLInfo->SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), strModelName.GetString() ) );
 					}
 				}
 
@@ -225,171 +227,174 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 				pFile->Destroy();
 			}
 
-			// Try to merge models... Fuck it...
-			// We need to find all equal models and merge them into a single one, because the only difference is animations
-			T2_FOREACH( vecDecompiled, it )
+			if ( bMerge )
 			{
-				// Skip invalid models or the ones already merged
-				if ( !it->bValid || it->bMerged ) continue;
-
-				const TSIZE iNumMats   = it->pGLTFModel->materials.size();
-				const TSIZE iNumMeshes = it->pGLTFModel->meshes.size();
-				const TSIZE iNumSkins  = it->pGLTFModel->skins.size();
-				if ( iNumMats == 0 || iNumMeshes == 0 || iNumSkins == 0 )
+				// Try to merge models... Fuck it...
+				// We need to find all equal models and merge them into a single one, because the only difference is animations
+				T2_FOREACH( vecDecompiled, it )
 				{
-					it->bMerged = TTRUE;
-					continue;
-				}
+					// Skip invalid models or the ones already merged
+					if ( !it->bValid || it->bMerged ) continue;
 
-				const TSIZE iNumBones = it->pGLTFModel->skins[ 0 ].joints.size();
-
-				T2_FOREACH( vecDecompiled, itOther )
-				{
-					// Skip models we don't want to compare to
-					if ( !itOther->bValid || itOther->bMerged || it == itOther ) continue;
-
-					// Do fast comparisons first
-					const TSIZE iNumMatsOther   = itOther->pGLTFModel->materials.size();
-					const TSIZE iNumMeshesOther = itOther->pGLTFModel->meshes.size();
-					const TSIZE iNumSkinsOther  = itOther->pGLTFModel->skins.size();
-					if ( iNumMatsOther != iNumMats || iNumMeshesOther != iNumMeshes || iNumSkinsOther == 0 ) continue;
-
-					const TSIZE iNumBonesOther = itOther->pGLTFModel->skins[ 0 ].joints.size();
-					if ( iNumBonesOther != iNumBones ) continue;
-
-					// At this stage we are sure number of various elements is the same, so need to make more deeper comparison
-					auto itTMDL      = it->pXML->FirstChildElement( "TMDL" );
-					auto itOtherTMDL = itOther->pXML->FirstChildElement( "TMDL" );
-
-					// First of all, compare materials
-					TBOOL bSame            = TTRUE;
-					auto  itMaterials      = itTMDL->FirstChildElement( "Materials" );
-					auto  itOtherMaterials = itOtherTMDL->FirstChildElement( "Materials" );
-					auto  itMat            = itMaterials->FirstChildElement( "Material" );
-					auto  itOtherMat       = itOtherMaterials->FirstChildElement( "Material" );
-					for ( TSIZE i = 0; bSame && i < iNumMats; i++ )
+					const TSIZE iNumMats   = it->pGLTFModel->materials.size();
+					const TSIZE iNumMeshes = it->pGLTFModel->meshes.size();
+					const TSIZE iNumSkins  = it->pGLTFModel->skins.size();
+					if ( iNumMats == 0 || iNumMeshes == 0 || iNumSkins == 0 )
 					{
-						bSame &= T2String8::CompareNoCase( itMat->Attribute( "Name" ), itOtherMat->Attribute( "Name" ) ) == 0;
-						if ( !bSame ) break;
-						bSame &= T2String8::CompareNoCase( itMat->Attribute( "Texture" ), itOtherMat->Attribute( "Texture" ) ) == 0;
-						if ( !bSame ) break;
-
-						itMat      = itMat->NextSiblingElement( "Material" );
-						itOtherMat = itOtherMat->NextSiblingElement( "Material" );
-					}
-					if ( !bSame ) continue;
-
-					// Compare keylib name
-					if ( 0 == T2String8::CompareNoCase( itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ), itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ) ) )
-					{
-						// The models are using the same keylib, so skip them...
+						it->bMerged = TTRUE;
 						continue;
 					}
 
-					// Compare bones
-					auto itBones      = itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
-					auto itOtherBones = itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
+					const TSIZE iNumBones = it->pGLTFModel->skins[ 0 ].joints.size();
 
-					auto itBone = itBones->FirstChildElement( "Bone" );
-					for ( TSIZE i = 0; bSame && i < iNumBones; i++ )
+					T2_FOREACH( vecDecompiled, itOther )
 					{
-						TBOOL bFoundBone  = TFALSE;
-						auto  itOtherBone = itOtherBones->FirstChildElement( "Bone" );
+						// Skip models we don't want to compare to
+						if ( !itOther->bValid || itOther->bMerged || it == itOther ) continue;
 
-						const TCHAR* pchItBoneName  = itBone->Attribute( "Name" );
-						const TCHAR* pchItBonePosX  = itBone->Attribute( "PosX" );
-						const TCHAR* pchItBonePosY  = itBone->Attribute( "PosY" );
-						const TCHAR* pchItBonePosZ  = itBone->Attribute( "PosZ" );
-						const TCHAR* pchItBoneQuatX = itBone->Attribute( "QuatX" );
-						const TCHAR* pchItBoneQuatY = itBone->Attribute( "QuatY" );
-						const TCHAR* pchItBoneQuatZ = itBone->Attribute( "QuatZ" );
-						const TCHAR* pchItBoneQuatW = itBone->Attribute( "QuatW" );
+						// Do fast comparisons first
+						const TSIZE iNumMatsOther   = itOther->pGLTFModel->materials.size();
+						const TSIZE iNumMeshesOther = itOther->pGLTFModel->meshes.size();
+						const TSIZE iNumSkinsOther  = itOther->pGLTFModel->skins.size();
+						if ( iNumMatsOther != iNumMats || iNumMeshesOther != iNumMeshes || iNumSkinsOther == 0 ) continue;
 
-						while ( itOtherBone && !bFoundBone )
+						const TSIZE iNumBonesOther = itOther->pGLTFModel->skins[ 0 ].joints.size();
+						if ( iNumBonesOther != iNumBones ) continue;
+
+						// At this stage we are sure number of various elements is the same, so need to make more deeper comparison
+						auto itTMDL      = it->pXML->FirstChildElement( "TMDL" );
+						auto itOtherTMDL = itOther->pXML->FirstChildElement( "TMDL" );
+
+						// First of all, compare materials
+						TBOOL bSame            = TTRUE;
+						auto  itMaterials      = itTMDL->FirstChildElement( "Materials" );
+						auto  itOtherMaterials = itOtherTMDL->FirstChildElement( "Materials" );
+						auto  itMat            = itMaterials->FirstChildElement( "Material" );
+						auto  itOtherMat       = itOtherMaterials->FirstChildElement( "Material" );
+						for ( TSIZE i = 0; bSame && i < iNumMats; i++ )
 						{
-							bFoundBone |= T2String8::Compare( pchItBoneName, itOtherBone->Attribute( "Name" ) ) == 0;
-							if ( bFoundBone ) break;
+							bSame &= T2String8::CompareNoCase( itMat->Attribute( "Name" ), itOtherMat->Attribute( "Name" ) ) == 0;
+							if ( !bSame ) break;
+							bSame &= T2String8::CompareNoCase( itMat->Attribute( "Texture" ), itOtherMat->Attribute( "Texture" ) ) == 0;
+							if ( !bSame ) break;
 
-							bFoundBone |= T2String8::Compare( pchItBonePosX, itOtherBone->Attribute( "PosX" ) ) == 0;
-							if ( bFoundBone ) break;
+							itMat      = itMat->NextSiblingElement( "Material" );
+							itOtherMat = itOtherMat->NextSiblingElement( "Material" );
+						}
+						if ( !bSame ) continue;
 
-							bFoundBone |= T2String8::Compare( pchItBonePosY, itOtherBone->Attribute( "PosY" ) ) == 0;
-							if ( bFoundBone ) break;
-
-							bFoundBone |= T2String8::Compare( pchItBonePosZ, itOtherBone->Attribute( "PosZ" ) ) == 0;
-							if ( bFoundBone ) break;
-
-							bFoundBone |= T2String8::Compare( pchItBoneQuatX, itOtherBone->Attribute( "QuatX" ) ) == 0;
-							if ( bFoundBone ) break;
-
-							bFoundBone |= T2String8::Compare( pchItBoneQuatY, itOtherBone->Attribute( "QuatY" ) ) == 0;
-							if ( bFoundBone ) break;
-
-							bFoundBone |= T2String8::Compare( pchItBoneQuatZ, itOtherBone->Attribute( "QuatZ" ) ) == 0;
-							if ( bFoundBone ) break;
-
-							bFoundBone |= T2String8::Compare( pchItBoneQuatW, itOtherBone->Attribute( "QuatW" ) ) == 0;
-							if ( bFoundBone ) break;
-							
-							itOtherBone = itOtherBone->NextSiblingElement( "Bone" );
+						// Compare keylib name
+						if ( 0 == T2String8::CompareNoCase( itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ), itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ) ) )
+						{
+							// The models are using the same keylib, so skip them...
+							continue;
 						}
 
-						bSame &= bFoundBone;
-						if ( !bSame ) break;
+						// Compare bones
+						auto itBones      = itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
+						auto itOtherBones = itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
 
-						itBone = itBone->NextSiblingElement( "Bone" );
-					}
-					if ( !bSame ) break;
-
-					// Compare meshes, kind of
-					for ( TSIZE i = 0; i < iNumMeshes; i++ )
-					{
-						auto pItMesh      = &it->pGLTFModel->meshes[ i ];
-						auto pItOtherMesh = &itOther->pGLTFModel->meshes[ i ];
-
-						bSame &= pItMesh->name == pItOtherMesh->name;
-						bSame &= pItMesh->primitives.size() == pItOtherMesh->primitives.size();
-						if ( !bSame ) break;
-
-						for ( TSIZE k = 0; k < pItMesh->primitives.size(); k++ )
+						auto itBone = itBones->FirstChildElement( "Bone" );
+						for ( TSIZE i = 0; bSame && i < iNumBones; i++ )
 						{
-							TBOOL bFound      = TFALSE;
-							TINT  iItIndices  = pItMesh->primitives[ k ].indices;
-							TINT  iItVertices = pItMesh->primitives[ k ].attributes[ "POSITION" ];
+							TBOOL bFoundBone  = TFALSE;
+							auto  itOtherBone = itOtherBones->FirstChildElement( "Bone" );
 
-							// Compare by indices and vertices
-							for ( TSIZE j = 0; !bFound && j < pItOtherMesh->primitives.size(); j++ )
+							const TCHAR* pchItBoneName  = itBone->Attribute( "Name" );
+							const TCHAR* pchItBonePosX  = itBone->Attribute( "PosX" );
+							const TCHAR* pchItBonePosY  = itBone->Attribute( "PosY" );
+							const TCHAR* pchItBonePosZ  = itBone->Attribute( "PosZ" );
+							const TCHAR* pchItBoneQuatX = itBone->Attribute( "QuatX" );
+							const TCHAR* pchItBoneQuatY = itBone->Attribute( "QuatY" );
+							const TCHAR* pchItBoneQuatZ = itBone->Attribute( "QuatZ" );
+							const TCHAR* pchItBoneQuatW = itBone->Attribute( "QuatW" );
+
+							while ( itOtherBone && !bFoundBone )
 							{
-								TINT iItOtherIndices = pItOtherMesh->primitives[ k ].indices;
-								TINT iItOtherVertices = pItOtherMesh->primitives[ k ].attributes[ "POSITION" ];
+								bFoundBone |= T2String8::Compare( pchItBoneName, itOtherBone->Attribute( "Name" ) ) == 0;
+								if ( bFoundBone ) break;
 
-								bFound = it->pGLTFModel->accessors[ iItIndices ].count == itOther->pGLTFModel->accessors[ iItOtherIndices ].count;
-								bFound = it->pGLTFModel->accessors[ iItVertices ].count == itOther->pGLTFModel->accessors[ iItOtherVertices ].count;
-								if ( !bFound ) break;
+								bFoundBone |= T2String8::Compare( pchItBonePosX, itOtherBone->Attribute( "PosX" ) ) == 0;
+								if ( bFoundBone ) break;
 
-								// TODO?: compare UV
+								bFoundBone |= T2String8::Compare( pchItBonePosY, itOtherBone->Attribute( "PosY" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								bFoundBone |= T2String8::Compare( pchItBonePosZ, itOtherBone->Attribute( "PosZ" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								bFoundBone |= T2String8::Compare( pchItBoneQuatX, itOtherBone->Attribute( "QuatX" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								bFoundBone |= T2String8::Compare( pchItBoneQuatY, itOtherBone->Attribute( "QuatY" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								bFoundBone |= T2String8::Compare( pchItBoneQuatZ, itOtherBone->Attribute( "QuatZ" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								bFoundBone |= T2String8::Compare( pchItBoneQuatW, itOtherBone->Attribute( "QuatW" ) ) == 0;
+								if ( bFoundBone ) break;
+
+								itOtherBone = itOtherBone->NextSiblingElement( "Bone" );
 							}
 
-							bSame &= bFound;
+							bSame &= bFoundBone;
 							if ( !bSame ) break;
+
+							itBone = itBone->NextSiblingElement( "Bone" );
 						}
 						if ( !bSame ) break;
+
+						// Compare meshes, kind of
+						for ( TSIZE i = 0; i < iNumMeshes; i++ )
+						{
+							auto pItMesh      = &it->pGLTFModel->meshes[ i ];
+							auto pItOtherMesh = &itOther->pGLTFModel->meshes[ i ];
+
+							bSame &= pItMesh->name == pItOtherMesh->name;
+							bSame &= pItMesh->primitives.size() == pItOtherMesh->primitives.size();
+							if ( !bSame ) break;
+
+							for ( TSIZE k = 0; k < pItMesh->primitives.size(); k++ )
+							{
+								TBOOL bFound      = TFALSE;
+								TINT  iItIndices  = pItMesh->primitives[ k ].indices;
+								TINT  iItVertices = pItMesh->primitives[ k ].attributes[ "POSITION" ];
+
+								// Compare by indices and vertices
+								for ( TSIZE j = 0; !bFound && j < pItOtherMesh->primitives.size(); j++ )
+								{
+									TINT iItOtherIndices  = pItOtherMesh->primitives[ k ].indices;
+									TINT iItOtherVertices = pItOtherMesh->primitives[ k ].attributes[ "POSITION" ];
+
+									bFound = it->pGLTFModel->accessors[ iItIndices ].count == itOther->pGLTFModel->accessors[ iItOtherIndices ].count;
+									bFound = it->pGLTFModel->accessors[ iItVertices ].count == itOther->pGLTFModel->accessors[ iItOtherVertices ].count;
+									if ( !bFound ) break;
+
+									// TODO?: compare UV
+								}
+
+								bSame &= bFound;
+								if ( !bSame ) break;
+							}
+							if ( !bSame ) break;
+						}
+
+						// Okay... It reached the end and even though bSame might be TFALSE, one more critical check is required
+						// Some models are compiled with different settings (or manually edited), so the previous check might give
+						// false negatives sometimes
+						TString8 strItModelName      = itTMDL->Attribute( "Name" );
+						TString8 strItOtherModelName = itOtherTMDL->Attribute( "Name" );
+
+						if ( !bSame && ( !strItOtherModelName.EndsWithNoCase( "_a2" ) && !strItOtherModelName.EndsWithNoCase( "_a3" ) ) && ( !strItModelName.EndsWithNoCase( "_a2" ) && !strItModelName.EndsWithNoCase( "_a3" ) ) ) break;
+
+						TINFO( "Found duplicates: %s and %s\n", strItModelName.GetString(), strItOtherModelName.GetString() );
+						itOther->bMerged = TTRUE;
 					}
 
-					// Okay... It reached the end and even though bSame might be TFALSE, one more critical check is required
-					// Some models are compiled with different settings (or manually edited), so the previous check might give
-					// false negatives sometimes
-					TString8 strItModelName      = itTMDL->Attribute( "Name" );
-					TString8 strItOtherModelName = itOtherTMDL->Attribute( "Name" );
-
-					if ( !bSame && ( !strItOtherModelName.EndsWithNoCase( "_a2" ) && !strItOtherModelName.EndsWithNoCase( "_a3" ) ) && ( !strItModelName.EndsWithNoCase( "_a2" ) && !strItModelName.EndsWithNoCase( "_a3" ) ) ) break;
-
-					TINFO( "Found duplicates: %s and %s\n", strItModelName.GetString(), strItOtherModelName.GetString() );
-					itOther->bMerged = TTRUE;
+					// Don't process it anymore
+					it->bMerged = TTRUE;
 				}
-
-				// Don't process it anymore
-				it->bMerged = TTRUE;
 			}
 		}
 		else fnExportModel( strInputFileName );
