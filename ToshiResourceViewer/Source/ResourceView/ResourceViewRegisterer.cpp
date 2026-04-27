@@ -4,6 +4,7 @@
 #include "TextureResourceView.h"
 #include "KeyLibResourceView.h"
 #include "ModelResourceView.h"
+#include "GameTimeFXResourceView.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -65,6 +66,17 @@ static struct ResourceViewRegisterer
 			pSymbol->AddName( "keylib" );
 			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
 				return new KeyLibResourceView();
+			} );
+
+			TRBSymbolManager::RegisterSymbol( pSymbol );
+		}
+
+		{
+			// GameTimeFXSettings Resource
+			TRBSymbol* pSymbol = new TRBSymbol();
+			pSymbol->AddName( "weathersettings" );
+			pSymbol->SetFactoryMethod( []() -> TRBResourceView* {
+				return new GameTimeFXResourceView();
 			} );
 
 			TRBSymbolManager::RegisterSymbol( pSymbol );
