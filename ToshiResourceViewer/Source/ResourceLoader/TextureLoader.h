@@ -17,7 +17,25 @@ TBOOL TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreateTextures, TBOOL 
 TBOOL TTL_Load_Barnyard_Windows( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 
-TBOOL TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir );
+enum class TextureFileFormat
+{
+	DDS,
+	TGA,
+	PNG
+};
+
+TFORCEINLINE const TCHAR* GetTextureFileFormatExtension( TextureFileFormat eFormat )
+{
+	switch (eFormat)
+	{
+		case TextureFileFormat::DDS: return ".dds";
+		case TextureFileFormat::TGA: return ".tga";
+		case TextureFileFormat::PNG: return ".png";
+		default: return ".png";
+	}
+}
+
+TBOOL TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir, TextureFileFormat eOutputFormat );
 
 struct TTL_Win
 {

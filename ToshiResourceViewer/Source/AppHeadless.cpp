@@ -19,6 +19,8 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 	const TBOOL bCompress        = g_pCmd->HasParameter( "-compress" );
 	const TBOOL bSkinned         = g_pCmd->HasParameter( "-skinned" );
 	const TBOOL bMerge           = g_pCmd->HasParameter( "-merge" );
+	const TBOOL bModels          = g_pCmd->HasParameter( "-models" );
+	const TBOOL bMatlibs         = g_pCmd->HasParameter( "-matlibs" );
 	TString8    strOutputPath    = g_pCmd->GetParameterValue( "-output" );
 	TString8    strInputFilePath = g_pCmd->GetParameterValue( "-input" );
 
@@ -134,10 +136,10 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 		auto             fnMoveCursor = [ & ]() {
             pModelCursor = &vecDecompiled.PushBack();
 
-			pModelCursor->pGLTFModel = new tinygltf::Model;
-			pModelCursor->pXML       = new tinyxml2::XMLDocument;
-			pModelCursor->bValid     = TFALSE;
-			pModelCursor->bMerged    = TFALSE;
+            pModelCursor->pGLTFModel = new tinygltf::Model;
+            pModelCursor->pXML       = new tinyxml2::XMLDocument;
+            pModelCursor->bValid     = TFALSE;
+            pModelCursor->bMerged    = TFALSE;
 
             pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewDeclaration() );
             pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewComment( "Decompiled with Toshi Resource Viewer" ) );
@@ -145,14 +147,12 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 		tinygltf::TinyGLTF gltfWriter;
 
-		auto fnExportModel = [ &strOutputPath, &pModelCursor, &fnMoveCursor, &gltfWriter ]( const TString8& strFilePath ) -> TPString8 {
+		auto fnExportModel = [ &strOutputPath, &pModelCursor, &fnMoveCursor, &gltfWriter ]( PTRB& oInTRB, const TString8& strFilePath ) -> TPString8 {
 			const TINT iLastSlashIndex   = strFilePath.FindReverse( '\\' );
 			TString8   strInputFile      = ( iLastSlashIndex != -1 ) ? TString8( strFilePath.GetString( iLastSlashIndex + 1 ) ) : strFilePath;
 			TString8   strInputFileNoExt = strInputFile.Mid( 0, strInputFile.FindReverse( '.' ) );
 
-			// Only skinned models are supported atm
-			PTRB oInTRB( strFilePath.GetString() );
-			auto pTMDLHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" );
+			auto pTMDLHeader     = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" );
 			auto pDatabaseHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" );
 			if ( !pTMDLHeader && !pDatabaseHeader ) return TPString8();
 
@@ -177,12 +177,69 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			return TPString8();
 		};
 
+		enum class ResourceType
+		{
+			Unknown,
+			Model,
+			Matlib
+		};
+
+		auto fnExportMatlib = [ &strOutputPath, &pModelCursor, &fnMoveCursor, &gltfWriter ]( PTRB& oInTRB, const TString8& strFilePath ) {
+			PTRBSymbols* pSymbols = oInTRB.GetSymbols();
+
+			for ( TUINT i = 0; i < pSymbols->GetCount(); i++ )
+			{
+				TString8 strSymbolName = pSymbols->GetName( i ).Get();
+
+				if ( !strSymbolName.CompareNoCase( "ttl" ) || strSymbolName.EndsWithNoCase( "_ttl" ) )
+				{
+					// Load textures and unpack them
+					ResourceLoader::Textures vecTextures;
+
+					if ( ResourceLoader::TTL_Load( pSymbols->GetByIndex<TBYTE>( oInTRB.GetSections(), i ).get(), oInTRB.GetEndianess(), TFALSE, TFALSE, vecTextures, TNULL ) )
+					{
+						ResourceLoader::TTL_UnpackTextures( vecTextures, strOutputPath, ResourceLoader::TextureFileFormat::TGA );
+					}
+				}
+			}
+		};
+
+		auto fnGetResourceType = [ bModels, bMatlibs ]( PTRB& oInTRB ) -> ResourceType {
+			auto pTMDLHeader     = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" );
+			auto pDatabaseHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" );
+
+			if ( bModels && ( oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" ) || oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" ) ) )
+				return ResourceType::Model;
+			
+			if ( bMatlibs && ( oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "TTL" ) ) )
+				return ResourceType::Matlib;
+
+			return ResourceType::Unknown;
+		};
+
+		auto fnExportResource = [ &fnGetResourceType, &fnExportModel, &fnExportMatlib ]( PTRB& oInTRB, const TString8& strFilePath ) {
+			auto pTMDLHeader     = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" );
+			auto pDatabaseHeader = oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" );
+
+			auto eResType = fnGetResourceType( oInTRB );
+
+			switch ( eResType )
+			{
+				case ResourceType::Model:
+					fnExportModel( oInTRB, strFilePath );
+					break;
+				case ResourceType::Matlib:
+					fnExportMatlib( oInTRB, strFilePath );
+					break;
+			}
+		};
+
 		const TBOOL bDecompileAll = g_pCmd->HasParameter( "-all" );
 
 		if ( bDecompileAll )
 		{
 			T2Map<TPString8, T2DynamicVector<TString8>, TPString8::Comparator> mapTKLToModels;
-			TFileSystem* pFileSystem = TFileManager::GetSingleton()->FindFileSystem( "local" );
+			TFileSystem*                                                       pFileSystem = TFileManager::GetSingleton()->FindFileSystem( "local" );
 
 			TString8 strCurrentFile;
 			TBOOL    bHasFile = pFileSystem->GetFirstFile( strInputFilePath, strCurrentFile );
@@ -190,19 +247,35 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			fnMoveCursor();
 			while ( bHasFile )
 			{
-				if ( strCurrentFile.EndsWithNoCase( ".trb" ) )
+				if ( strCurrentFile.EndsWithNoCase( ".trb" ) || strCurrentFile.EndsWithNoCase( ".trz" ) || strCurrentFile.EndsWithNoCase( ".ttl" ) )
 				{
-					TString8  strFullPath = TString8::VarArgs( "%s\\%s", strInputFilePath.GetString(), strCurrentFile.GetString() );
-					TPString8 strTKLName  = fnExportModel( strFullPath );
+					TString8 strFullPath = TString8::VarArgs( "%s\\%s", strInputFilePath.GetString(), strCurrentFile.GetString() );
 
-					if ( !strTKLName.IsEmpty() )
+					PTRB oInTRB;
+					if ( oInTRB.ReadFromFile( strFullPath.GetString() ) )
 					{
-						// Add TKL to the list
-						auto itModelList = mapTKLToModels.Find( strTKLName );
-						T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
+						ResourceType eResType = fnGetResourceType( oInTRB );
 
-						TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
-						pModelList->PushBack( strModelName );
+						// Special case when handling model resource type!
+						if ( eResType == ResourceType::Model )
+						{
+							TPString8 strTKLName = fnExportModel( oInTRB, strFullPath );
+
+							if ( !strTKLName.IsEmpty() )
+							{
+								// Add TKL to the list
+								auto                       itModelList = mapTKLToModels.Find( strTKLName );
+								T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
+
+								TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
+								pModelList->PushBack( strModelName );
+							}
+						}
+						else if ( eResType != ResourceType::Unknown )
+						{
+							// Handle any other case
+							fnExportResource( oInTRB, strFullPath );
+						}
 					}
 				}
 
@@ -223,7 +296,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 					pFile->Write( ".gltf", 5 );
 					pFile->Write( &NEW_LINE, 1 );
 				}
-				
+
 				pFile->Destroy();
 			}
 
@@ -397,6 +470,12 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 				}
 			}
 		}
-		else fnExportModel( strInputFileName );
+		else
+		{
+			PTRB oInTRB;
+
+			if ( oInTRB.ReadFromFile( strInputFileName.GetString() ) )
+				fnExportResource( oInTRB, strInputFileName );
+		}
 	}
 }

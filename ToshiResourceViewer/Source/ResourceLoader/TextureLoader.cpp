@@ -230,7 +230,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 	return TTRUE;
 }
 
-TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir )
+TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOutDir, TextureFileFormat eOutputFormat )
 {
 	TString8 strOutPath;
 	T2_FOREACH( rTextures, it )
@@ -240,13 +240,12 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 		// Fix name of the file
 		if ( strFileName.EndsWithNoCase( ".tga" ) )
 		{
-			strFileName[ strFileName.Length() - 3 ] = 'p';
-			strFileName[ strFileName.Length() - 2 ] = 'n';
-			strFileName[ strFileName.Length() - 1 ] = 'g';
+			strFileName.Truncate( strFileName.FindReverse( '.' ) );
+			strFileName += GetTextureFileFormatExtension( eOutputFormat );
 		}
 		else
 		{
-			strFileName += ".png";
+			strFileName += GetTextureFileFormatExtension( eOutputFormat );
 		}
 
 		// Skip all '..\' sequences
@@ -266,7 +265,7 @@ TBOOL ResourceLoader::TTL_UnpackTextures( Textures& rTextures, const TCHAR* szOu
 		std::filesystem::path path( strOutPath.GetString() );
 		std::filesystem::create_directories( path.parent_path() );
 
-		stbi_write_png( strOutPath, it->Get()->GetTexture().iWidth, it->Get()->GetTexture().iHeight, 4, it->Get()->GetTexture().pData, 0 );
+		stbi_write_tga( strOutPath, it->Get()->GetTexture().iWidth, it->Get()->GetTexture().iHeight, 4, it->Get()->GetTexture().pData );
 	}
 
 	return TTRUE;
