@@ -123,7 +123,7 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 				dst.Normal                  = TVector3( 0.0f, 0.0f, 0.0f );
 				dst.Color                   = TVector3( flLightIntensity, flLightIntensity, flLightIntensity );
 				dst.UV.x                    = pUVData[ v * 2 + 0 ] * TTMDPS2::StaticInstance::UV_SCALE;
-				dst.UV.y                    = 1.0f - pUVData[ v * 2 + 1 ] * TTMDPS2::StaticInstance::UV_SCALE;
+				dst.UV.y                    = pUVData[ v * 2 + 1 ] * TTMDPS2::StaticInstance::UV_SCALE;
 			}
 
 			// Walk the u8 triangle strip to accumulate face normals per vertex
