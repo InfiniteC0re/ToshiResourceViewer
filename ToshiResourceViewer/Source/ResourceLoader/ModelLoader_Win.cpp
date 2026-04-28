@@ -318,7 +318,7 @@ static void ModelLoader_LoadSkinLOD_Barnyard_Windows( PTRB* pTRB, Endianess eEnd
 	}
 }
 
-T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( PTRB* pTRB, ModelType eModelType )
+T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( PTRB* pTRB )
 {
 	MaterialCache matCache;
 
@@ -334,7 +334,6 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 	TUtil::MemCopy( s_oCurrentModelMaterials, pMaterials.get() + 1, pTRB->ConvertEndianess( pMaterials->uiSectionSize ) );
 	s_oCurrentModelMaterialsHeader = *pMaterials;
 
-	pModel->eModelType         = eModelType;
 	pModel->pTRB               = pTRB;
 	pModel->iLODCount          = pTRB->ConvertEndianess( pHeader->m_iNumLODs );
 	pModel->aLODDistances[ 0 ] = pTRB->ConvertEndianess( pHeader->m_fLODDistance );

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ModelResourceView.h"
 #include "Shader/Mesh.h"
+#include "Application.h"
 
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
@@ -30,6 +31,7 @@ ModelResourceView::ModelResourceView()
     , m_fCameraRotY( 0.0f )
     , m_iSelectedSequence( -1 )
     , m_bAutoSaveTKL( TFALSE )
+    , m_bWireFrame( TFALSE )
 {
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
@@ -63,33 +65,35 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 		// Skinned mesh
 		if ( bIsSkinModel || bIsWorldModel )
 		{
-			ResourceLoader::ModelType eModelType = ResourceLoader::ModelType::World;
-
-			TBOOL bIsPS2 = TFALSE;
-
 			if ( bIsSkinModel )
 			{
 				TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
 
-				if ( pFileHeader->m_uiMagic != TFourCC( "TMDL" ) &&
-					 pFileHeader->m_uiMagic != TFourCC( "LDMT" ) )
+				if ( m_pTRB->ConvertEndianess( pFileHeader->m_uiMagic ) != TFourCC( "TMDL" ) )
 					return TFALSE;
-
-				eModelType = ResourceLoader::ModelType::Skin;
-
-				auto pRawHdr = m_pTRB->GetSymbols()->Find<TUINT32>( m_pTRB->GetSections(), "Header" );
-				if ( pRawHdr && *( pRawHdr.get() + 2 ) > 0x10000u )
-					bIsPS2 = TTRUE;
 			}
 			else if ( !m_pData )
 			{
 				return TFALSE;
 			}
 
-			ResourceLoader::Model_CreateInstance(
-			    ( bIsPS2 ) ? ResourceLoader::Model_Load_Barnyard_PS2( m_pTRB ) : ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, eModelType ),
-			    m_ModelInstance
-			);
+			Toshi::T2SharedPtr<ResourceLoader::Model> pModel;
+
+			// Multiple threads is not supported anyways, so don't care about the global state
+			switch ( g_oTheApp.GetSelectedPlatform() )
+			{
+				case TOSHISKU_PS2:
+					pModel = ResourceLoader::Model_Load_Barnyard_PS2( m_pTRB );
+					break;
+				case TOSHISKU_WINDOWS:
+					pModel = ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB );
+					break;
+				default:
+					TASSERT( !"Unsupported SKU of the model!!!" );
+					break;
+			}
+
+			if ( pModel ) ResourceLoader::Model_CreateInstance( pModel, m_ModelInstance );
 		}
 	}
 
@@ -444,10 +448,22 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 				m_oRenderContext.SetSkeletonInstance( m_ModelInstance.pSkeletonInstance );
 			}
 
+
 			m_ModelInstance.pModel->Render();
 		}
 	
+		if ( m_bWireFrame )
+		{
+			glLineWidth( 3.0f );
+			glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
+		}
+		else
+		{
+			glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		}
+
 		g_pRenderGL->FlushOrderTables();
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 		m_oRenderContext.GetViewport().End();
 		m_ViewportFrameBuffer.Unbind();
@@ -507,6 +523,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 	// Draw info
 	TINT iNumMessages = 0;
+	TINT iNumInfos = 0;
 
 	auto fnPrintErrorMessage = [ & ]( const TCHAR* szMessage ) {
 		iNumMessages += 1;
@@ -526,6 +543,38 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		ImGui::PopStyleColor();
 	};
 
+	auto fnPrintInfo = [ & ]( const TCHAR* szMessage ) {
+		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
+		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( ImGui::GetFontSize() * iNumInfos + 4.0f ) ) );
+		ImGui::Text( szMessage );
+		ImGui::PopStyleColor();
+
+		iNumInfos += 1;
+	};
+
+	// Stats
+	switch (m_ModelInstance.pModel->eModelType)
+	{
+		case ResourceLoader::ModelType::Skin:
+			fnPrintInfo( "Shader Type: Skin" );
+			break;
+		case ResourceLoader::ModelType::World:
+			fnPrintInfo( "Shader Type: World" );
+			break;
+		case ResourceLoader::ModelType::Grass:
+			fnPrintInfo( "Shader Type: Grass" );
+			break;
+		case ResourceLoader::ModelType::StaticInstance:
+			fnPrintInfo( "Shader Type: Static Instance" );
+			break;
+	}
+
+	if ( m_ModelInstance.pModel->pKeyLib )
+		fnPrintInfo( TString8::VarArgs( "Keylib: %s", m_ModelInstance.pModel->pKeyLib->GetName().GetString() ) );
+
+	fnPrintInfo( TString8::VarArgs( "Frame Time: %.2fms (%d FPS)", flDeltaTime * 1000.0f, TINT( 1.0f / flDeltaTime ) ) );
+
+	// Hints
 	fnPrintMessage( "Hold Right Mouse Button + Shift to rotate camera." );
 	fnPrintMessage( "Hold Right Mouse Button to move camera center." );
 	

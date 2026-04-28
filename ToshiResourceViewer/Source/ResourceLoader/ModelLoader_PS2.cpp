@@ -107,8 +107,9 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 
 			TUINT NV = subMesh.m_uiNumVertices;
 
-			const TINT16* pPosData = subMesh.m_pPositions + TTMDPS2::StaticInstance::POSITIONS_HDR_SIZE / sizeof( TINT16 );
-			const TINT16* pUVData  = subMesh.m_pUVs + TTMDPS2::StaticInstance::UV_HDR_SIZE / sizeof( TINT16 );
+			const TINT16* pPosData   = subMesh.m_pPositions + TTMDPS2::StaticInstance::POSITIONS_HDR_SIZE / sizeof( TINT16 );
+			const TINT16* pUVData    = subMesh.m_pUVs + TTMDPS2::StaticInstance::UV_HDR_SIZE / sizeof( TINT16 );
+			const TUINT8* pColorData = subMesh.m_pColors + TTMDPS2::StaticInstance::COLOR_HDR_SIZE;
 
 			for ( TUINT v = 0; v < NV; v++ )
 			{
@@ -117,8 +118,10 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 				dst.Position = TVector3( pPosData[ v * 3 + 0 ], pPosData[ v * 3 + 1 ], pPosData[ v * 3 + 2 ] );
 				dst.Position.Multiply( TTMDPS2::StaticInstance::POSITION_SCALE );
 
+				const TFLOAT flLightIntensity = pColorData[ v ] / 255.0f;
+
 				dst.Normal                  = TVector3( 0.0f, 0.0f, 0.0f );
-				dst.Color                   = TVector3( 1.0f, 1.0f, 1.0f );
+				dst.Color                   = TVector3( flLightIntensity, flLightIntensity, flLightIntensity );
 				dst.UV.x                    = pUVData[ v * 2 + 0 ] * TTMDPS2::StaticInstance::UV_SCALE;
 				dst.UV.y                    = 1.0f - pUVData[ v * 2 + 1 ] * TTMDPS2::StaticInstance::UV_SCALE;
 			}
@@ -196,47 +199,39 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 			TUINT NV = subMesh.m_uiNumVertices;
 			TUINT NI = subMesh.m_uiNumIndices;
 
-			TUINT16*      pTriBuf    = new TUINT16[ NI * 3 ];
-			TUINT         uiTriCount = 0;
-			TINT          stripLen   = 0;
-			TUINT16       win[ 2 ]   = {};
-			const TUINT8* pIdxData   = subMesh.m_pIndices + TTMDPS2::StaticInstance::INDEX_HDR_SIZE;
+			TUINT16*      pStripBuf    = new TUINT16[ NI * 2 ];
+			TUINT         uiStripCount = 0;
 
+			const TUINT8* pIdxData = subMesh.m_pIndices + TTMDPS2::StaticInstance::INDEX_HDR_SIZE;
 			for ( TUINT k = 0; k < NI; k++ )
 			{
-				TUINT8  raw = pIdxData[ k ];
-				TUINT16 vi  = TUINT16( ( raw & 0x7F ) + uiVtxOffset );
-				TBOOL   adc = ( raw & 0x80 ) != 0;
+				TUINT8  uiRaw       = pIdxData[ k ];
+				TBOOL   bDegenerate = ( uiRaw & 0x80 ) != 0;
+				TUINT16 uiIdx       = TUINT16( ( uiRaw & 0x7F ) + uiVtxOffset );
 
-				if ( adc )
+				if ( bDegenerate && k != 0 )
 				{
-					win[ 0 ] = vi;
-					stripLen = 1;
-				}
-				else if ( stripLen < 2 )
-				{
-					win[ stripLen++ ] = vi;
+					pStripBuf[ uiStripCount ] = pStripBuf[ uiStripCount - 1 ];
+					uiStripCount++;
+
+					pStripBuf[ uiStripCount ] = uiIdx;
+					uiStripCount++;
 				}
 				else
 				{
-					pTriBuf[ uiTriCount * 3 + 0 ] = win[ 0 ];
-					pTriBuf[ uiTriCount * 3 + 1 ] = win[ 1 ];
-					pTriBuf[ uiTriCount * 3 + 2 ] = vi;
-					uiTriCount++;
-					win[ 0 ] = win[ 1 ];
-					win[ 1 ] = vi;
+					pStripBuf[ uiStripCount++ ] = uiIdx;
 				}
 			}
 
-			if ( uiTriCount > 0 )
+			if ( uiStripCount > 0 )
 			{
 				auto& sm         = pMesh->vecSubMeshes.PushBack();
-				sm.uiNumIndices  = uiTriCount * 3;
+				sm.uiNumIndices  = uiStripCount;
 				sm.uiNumVertices = NV;
 
 				T2VertexArray::Unbind();
 
-				sm.oIndexBuffer = T2Render::CreateIndexBuffer( pTriBuf, uiTriCount * 3, GL_STATIC_DRAW );
+				sm.oIndexBuffer = T2Render::CreateIndexBuffer( pStripBuf, uiStripCount, GL_STATIC_DRAW );
 				sm.oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, sm.oIndexBuffer );
 				sm.oVertexArray.Bind();
 				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Position ) );
@@ -245,7 +240,7 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 2, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, UV ) );
 			}
 
-			delete[] pTriBuf;
+			delete[] pStripBuf;
 			uiVtxOffset += NV;
 		}
 	}

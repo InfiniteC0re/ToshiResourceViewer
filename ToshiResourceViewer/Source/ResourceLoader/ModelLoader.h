@@ -100,7 +100,7 @@ struct ModelInstance
 	Toshi::TSkeletonInstance*                 pSkeletonInstance;
 };
 
-Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB, ModelType eModelType );
+Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB );
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_PS2( PTRB* pTRB );
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath );
 TBOOL                                     Model_PrepareAnimations( ResourceLoader::Model* pModel );

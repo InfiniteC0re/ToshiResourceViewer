@@ -35,6 +35,8 @@ public:
 
 private:
 	Toshi::T2FormatString64       m_strAnimationsId;
+	Toshi::T2FormatString64       m_strLeftSideSplitId;
+	Toshi::T2FormatString64       m_strPropertiesId;
 	ResourceLoader::ModelInstance m_ModelInstance;
 	TINT                          m_iSelectedSequence;
 
@@ -50,4 +52,6 @@ private:
 	TFLOAT          m_fCameraRotX;
 	TFLOAT          m_fCameraRotY;
 	TFLOAT          m_fCameraFOV;
+
+	TBOOL m_bWireFrame;
 };

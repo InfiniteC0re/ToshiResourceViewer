@@ -4,6 +4,8 @@
 #include "Application.h"
 #include "imgui.h"
 
+#include <Render/TTMDBase.h>
+
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
@@ -22,22 +24,48 @@ TRBFileWindow::~TRBFileWindow()
 	UnloadFile();
 }
 
+static TOSHISKU DetermineFileSKU( PTRB* pFile )
+{
+	//-----------------------------------------------------------------------------
+	// PS2 and Windows share the same endianness, so there's no way to easily
+	// detect platform. We will bruteforce various symbols to assume the platform.
+	//-----------------------------------------------------------------------------
+
+	TOSHISKU eSKU = TOSHISKU_WINDOWS;
+
+	if ( pFile->GetEndianess() == Endianess_Big )
+	{
+		// [6/25/2025 InfiniteC0re]
+		// HACK: since the only supported Big Endian platform is Wii, assume we are trying to load a Wii file
+		eSKU = TOSHISKU_REV;
+	}
+	else
+	{
+		// Little endian
+
+		// Check models format
+		if ( auto pFileHeader = pFile->GetSymbols()->Find<TTMDBase::FileHeader>( pFile->GetSections(), "FileHeader" ) )
+		{
+			if ( pFile->ConvertEndianess( pFileHeader->m_uiMagic ) == TFourCC( "TMDL" ) )
+			{
+				auto pRawHdr = pFile->GetSymbols()->Find<TUINT32>( pFile->GetSections(), "Header" );
+				if ( pRawHdr && *( pRawHdr.get() + 2 ) > 0x10000u )
+					eSKU = TOSHISKU_PS2;
+			}
+		}
+	}
+
+	return eSKU;
+}
+
 TBOOL TRBFileWindow::LoadTRBFile( Toshi::T2StringView strFilePath )
 {
 	if ( LoadInternal( strFilePath, TTRUE ) )
 	{
 		m_bExternal = TFALSE;
 
-		if ( m_pFile->GetEndianess() == Endianess_Big )
-		{
-			// [6/25/2025 InfiniteC0re]
-			// HACK: since the only supported Big Endian platform is Wii, assume we are trying to load a Wii file
-			g_oTheApp.SetSelectedPlatform( TOSHISKU_REV );
-		}
-		else
-		{
-			g_oTheApp.SetSelectedPlatform( TOSHISKU_WINDOWS );
-		}
+		const TOSHISKU eSKU = DetermineFileSKU( m_pFile );
+		g_oTheApp.SetSelectedPlatform( eSKU );
 
 		m_strWindowName = m_strFileName.GetString();
 
@@ -60,6 +88,9 @@ TBOOL TRBFileWindow::LoadTRBFile( Toshi::T2StringView strFilePath )
 				break;
 			case TOSHISKU_REV:
 				m_strWindowName += " (GameCube / Wii)";
+				break;
+			case TOSHISKU_PS2:
+				m_strWindowName += " (PS2)";
 				break;
 		}
 
