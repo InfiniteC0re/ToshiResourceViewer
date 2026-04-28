@@ -11,6 +11,7 @@ TOSHI_NAMESPACE_USING
 
 TDEFINE_CLASS( SkinShader );
 TDEFINE_CLASS( SkinMesh );
+TDEFINE_CLASS( SkinMaterial );
 
 SkinShader::SkinShader()
 {
@@ -124,11 +125,11 @@ SkinMesh* SkinShader::CreateMesh()
 	return pMesh;
 }
 
-SkinMaterial* SkinShader::CreateMaterial()
+Toshi::T2SharedPtr<SkinMaterial> SkinShader::CreateMaterial()
 {
 	Validate();
 
-	SkinMaterial* pMaterial = new SkinMaterial();
+	auto pMaterial = Toshi::T2SharedPtr<SkinMaterial>::New();
 	pMaterial->SetShader( this );
 	pMaterial->SetOrderTable( &m_aOrderTable );
 
@@ -159,9 +160,6 @@ TBOOL SkinMesh::Render()
 void SkinMesh::OnDestroy()
 {
 	BaseClass::OnDestroy();
-
-	delete m_pMaterial;
-	m_pMaterial = TNULL;
 }
 
 TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeletonInstance* a_pSkeletonInstance )
@@ -174,8 +172,8 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	//-----------------------------------------------------------------------------
 	// 1. Materials
 	//-----------------------------------------------------------------------------
-	SkinMaterial* pMaterial = TSTATICCAST( SkinMaterial, GetMaterial() );
-	TINT iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
+	T2SharedPtr<SkinMaterial> pMaterial = GetMaterial();
+	TINT                      iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
 
 	if ( pMaterial && iMaterialIndex == -1 )
 	{
@@ -577,7 +575,7 @@ TBOOL SkinMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr<
 
 void SkinMesh::GetMaterialInfo( Toshi::TString8& a_rMatName, Toshi::TString8& a_rTexName )
 {
-	SkinMaterial* pMaterial = TSTATICCAST( SkinMaterial, GetMaterial() );
+	T2SharedPtr<SkinMaterial> pMaterial = GetMaterial();
 
 	a_rMatName = GetMaterialName();
 	a_rTexName = pMaterial->AccessTexture()->GetTexture().strName;

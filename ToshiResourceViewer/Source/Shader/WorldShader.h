@@ -1,5 +1,6 @@
 #pragma once
 #include "Resource/StreamedTexture.h"
+#include "Resource/Material.h"
 #include "Mesh.h"
 
 #include <Toshi/TSingleton.h>
@@ -57,8 +58,12 @@ private:
 	TBOOL m_bIsWater = TFALSE;
 };
 
-class WorldMaterial : public Toshi::TMaterial
+class WorldMaterial
+	: public Resource::Material
 {
+public:
+	TDECLARE_CLASS( WorldMaterial, Resource::Material );
+
 public:
 	static constexpr TUINT MAX_TEXTURES = 4;
 	using BLENDMODE = TINT;
@@ -87,7 +92,7 @@ public:
 	Resource::StreamedTexture* AccessTexture( TUINT a_uiIndex = 0 )
 	{
 		TASSERT( a_uiIndex < MAX_TEXTURES );
-		return m_aTextures[ a_uiIndex ];
+		return m_aTextures[ a_uiIndex ].Get();
 	}
 
 	WorldMaterial* GetAlphaBlendMaterial() const { return m_pAlphaBlendMaterial; }
@@ -138,8 +143,8 @@ public:
 	virtual TBOOL Create() OVERRIDE;
 	virtual void  Render( Toshi::TRenderPacket* a_pRenderPacket ) OVERRIDE;
 
-	WorldMesh*     CreateMesh();
-	WorldMaterial* CreateMaterial();
+	WorldMesh*                        CreateMesh();
+	Toshi::T2SharedPtr<WorldMaterial> CreateMaterial();
 
 	void  EnableRenderEnvMap( TBOOL a_bEnable ) { m_bRenderEnvMap = a_bEnable; }
 	TBOOL IsRenderEnvMapEnabled() const { return m_bRenderEnvMap; }

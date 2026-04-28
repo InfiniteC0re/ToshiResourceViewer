@@ -65,6 +65,8 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 		{
 			ResourceLoader::ModelType eModelType = ResourceLoader::ModelType::World;
 
+			TBOOL bIsPS2 = TFALSE;
+
 			if ( bIsSkinModel )
 			{
 				TTMDBase::FileHeader* pFileHeader = TSTATICCAST( TTMDBase::FileHeader, m_pData );
@@ -74,13 +76,20 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 					return TFALSE;
 
 				eModelType = ResourceLoader::ModelType::Skin;
+
+				auto pRawHdr = m_pTRB->GetSymbols()->Find<TUINT32>( m_pTRB->GetSections(), "Header" );
+				if ( pRawHdr && *( pRawHdr.get() + 2 ) > 0x10000u )
+					bIsPS2 = TTRUE;
 			}
 			else if ( !m_pData )
 			{
 				return TFALSE;
 			}
 
-			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, eModelType ), m_ModelInstance );
+			ResourceLoader::Model_CreateInstance(
+			    ( bIsPS2 ) ? ResourceLoader::Model_Load_Barnyard_PS2( m_pTRB ) : ResourceLoader::Model_Load_Barnyard_Windows( m_pTRB, eModelType ),
+			    m_ModelInstance
+			);
 		}
 	}
 
@@ -89,7 +98,7 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
 	m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
 	
-	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid() && TryFixingMissingTKL();
+	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid() && ( TryFixingMissingTKL(), TTRUE );
 }
 
 TBOOL ModelResourceView::CanSave()
@@ -420,7 +429,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 		if ( m_ModelInstance.pModel )
 		{
-			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel ) )
+			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel.Get() ) )
 			{
 				m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
 				
@@ -943,7 +952,7 @@ TBOOL ModelResourceView::TryFixingMissingTKL()
 		auto pTKLHeader = oTKLFile.GetSymbols()->Find<TKeyframeLibrary::TRBHeader>( oTKLFile.GetSections(), "keylib" );
 		if ( !pTKLHeader ) return TFALSE;
 
-		return m_ModelInstance.pModel->pKeyLib->Create( pTKLHeader.get() ) && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel );
+		return m_ModelInstance.pModel->pKeyLib->Create( pTKLHeader.get() ) && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel.Get() );
 	}
 
 	return TTRUE;

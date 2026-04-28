@@ -1,5 +1,6 @@
 #pragma once
 #include "Resource/StreamedKeyLib.h"
+#include "Resource/Material.h"
 #include "ResourceLoader/TextureLoader.h"
 
 #include <Render/TModel.h>
@@ -18,7 +19,7 @@ enum class ModelType
 	Skin,
 	World,
 	Grass,
-	FOB,
+	StaticInstance,
 };
 
 TFORCEINLINE const TCHAR* GetModelTypeName( ModelType eModelType )
@@ -28,10 +29,38 @@ TFORCEINLINE const TCHAR* GetModelTypeName( ModelType eModelType )
 		case ModelType::Skin: return "Skin";
 		case ModelType::World: return "World";
 		case ModelType::Grass: return "Grass";
-		case ModelType::FOB: return "FOB";
+		case ModelType::StaticInstance: return "StaticInstance";
 		default: return "Unknown";
 	}
 }
+
+class MaterialCache
+{
+public:
+	Toshi::T2SharedPtr<Resource::Material> Find( const TCHAR* pchName )
+	{
+		T2_FOREACH( m_vecMaterials, it )
+		{
+			if ( Toshi::TStringManager::String8CompareNoCase( it->first.GetString(), pchName ) == 0 )
+				return it->second;
+		}
+
+		return {};
+	}
+
+	void Touch( const TCHAR* pchName, Toshi::T2SharedPtr<Resource::Material> pMaterial )
+	{
+		m_vecMaterials.PushBack( { pchName, pMaterial } );
+
+		if ( m_pClass == TNULL ) m_pClass = pMaterial->GetClass();
+		else TASSERT( m_pClass == pMaterial->GetClass() );
+	}
+
+private:
+	const Toshi::TClass* m_pClass = TNULL;
+
+	Toshi::T2DynamicVector<Toshi::T2Pair<Toshi::TString8, Toshi::T2SharedPtr<Resource::Material>>> m_vecMaterials;
+};
 
 class Model
 {
@@ -56,12 +85,10 @@ public:
 	TINT                        iNumCollisionMeshes;
 	Toshi::TModelCollisionData* pCollisionMeshes;
 
-	ResourceLoader::Textures                    vecUsedTextures;
-	Toshi::T2DynamicVector<Toshi::TMaterial*>   vecOwnedMaterials;
+	ResourceLoader::Textures vecUsedTextures;
 
 	ModelType eModelType;
 };
-
 
 struct ModelInstance
 {
@@ -74,9 +101,12 @@ struct ModelInstance
 };
 
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB, ModelType eModelType );
+Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_PS2( PTRB* pTRB );
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath );
 TBOOL                                     Model_PrepareAnimations( ResourceLoader::Model* pModel );
 TBOOL                                     Model_CreateInstance( Toshi::T2SharedPtr<ResourceLoader::Model> pModel, ModelInstance& rOutInstance );
+
+void ModelLoader_RegisterMaterial();
 
 void ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder );
 

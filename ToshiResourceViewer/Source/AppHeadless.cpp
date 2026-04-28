@@ -158,7 +158,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 			ModelResourceView oModelResView;
 			oModelResView.CreateTRB( &oInTRB, pTMDLHeader ? pTMDLHeader.get() : pDatabaseHeader.get(), pTMDLHeader ? "FileHeader" : "Database", strFilePath.GetString() );
-			if ( !oModelResView.TryFixingMissingTKL() ) return TPString8();
+			oModelResView.TryFixingMissingTKL();
 
 			oModelResView.SerializeModelInformation( pModelCursor->pXML );
 			pModelCursor->bValid = oModelResView.ExportScene( *pModelCursor->pGLTFModel );

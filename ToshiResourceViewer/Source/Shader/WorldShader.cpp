@@ -11,6 +11,7 @@ TOSHI_NAMESPACE_USING
 
 TDEFINE_CLASS( WorldShader );
 TDEFINE_CLASS( WorldMesh );
+TDEFINE_CLASS( WorldMaterial );
 
 WorldShader::WorldShader()
     : m_ShadowColour( 0.3f, 0.3f, 0.3f, 1.0f ), m_AmbientColour( 1.0f, 1.0f, 1.0f, 1.0f )
@@ -114,7 +115,7 @@ void WorldShader::Render( TRenderPacket* a_pRenderPacket )
 
 	if ( WorldMesh* pWorldMesh = TSTATICCAST( WorldMesh, a_pRenderPacket->GetMesh() ) )
 	{
-		WorldMaterial* pMaterial = TSTATICCAST( WorldMaterial, pWorldMesh->GetMaterial() );
+		T2SharedPtr<WorldMaterial> pMaterial = pWorldMesh->GetMaterial();
 
 		// Enable/disable alpha blend based on blend mode and packet alpha
 		TBOOL bNeedsBlend = ( pMaterial->GetBlendMode() != 0 ) || ( fAlpha < 1.0f );
@@ -149,22 +150,22 @@ WorldMesh* WorldShader::CreateMesh()
 	return pMesh;
 }
 
-WorldMaterial* WorldShader::CreateMaterial()
+Toshi::T2SharedPtr<WorldMaterial> WorldShader::CreateMaterial()
 {
 	Validate();
 
-	WorldMaterial* pMaterial = new WorldMaterial();
+	auto pMaterial = T2SharedPtr<WorldMaterial>::New();
 	pMaterial->SetShader( this );
 	pMaterial->SetBlendMode( 0 );
 
 	if ( IsAlphaBlendMaterial() )
 	{
-		WorldMaterial* pAlphaBlendMaterial = new WorldMaterial();
+		auto pAlphaBlendMaterial = T2SharedPtr<WorldMaterial>::New();
 		pAlphaBlendMaterial->SetShader( this );
 		pAlphaBlendMaterial->SetBlendMode( 1 );
 		pAlphaBlendMaterial->SetIsAlphaBlend( TTRUE );
 
-		pMaterial->SetAlphaBlendMaterial( pAlphaBlendMaterial );
+		pMaterial->SetAlphaBlendMaterial( pAlphaBlendMaterial.Get() );
 	}
 
 	return pMaterial;
@@ -214,8 +215,8 @@ TBOOL WorldMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, TSkeletonInsta
 	TINT iMeshStartIndex = TINT( a_rOutModel.meshes.size() );
 	TINT iBufferIndex    = TINT( a_rOutModel.buffers.size() );
 
-	WorldMaterial* pMaterial      = TSTATICCAST( WorldMaterial, GetMaterial() );
-	TINT           iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
+	T2SharedPtr<WorldMaterial> pMaterial      = GetMaterial();
+	TINT                       iMaterialIndex = pMaterial ? a_rOutModel.FindMaterialIndex( GetMaterialName() ) : -1;
 
 	if ( pMaterial && iMaterialIndex == -1 )
 	{
@@ -398,7 +399,7 @@ TBOOL WorldMesh::SerializeTRBMesh( PTRB* a_pTRB, PTRBSections::MemoryStream::Ptr
 
 void WorldMesh::GetMaterialInfo( Toshi::TString8& a_rMatName, Toshi::TString8& a_rTexName )
 {
-	WorldMaterial* pMaterial = TSTATICCAST( WorldMaterial, GetMaterial() );
+	T2SharedPtr<WorldMaterial> pMaterial = GetMaterial();
 
 	a_rMatName = GetMaterialName();
 	a_rTexName = pMaterial && pMaterial->AccessTexture()

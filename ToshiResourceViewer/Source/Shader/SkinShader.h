@@ -1,4 +1,5 @@
 #pragma once
+#include "Resource/Material.h"
 #include "Resource/StreamedTexture.h"
 #include "Mesh.h"
 
@@ -13,7 +14,8 @@
 
 #define SKINNED_SUBMESH_MAX_BONES 28
 
-class SkinMesh : public Mesh
+class SkinMesh
+	: public Mesh
 {
 public:
 	TDECLARE_CLASS( SkinMesh, Mesh );
@@ -58,8 +60,11 @@ public:
 };
 
 class SkinMaterial
-    : public Toshi::TMaterial
+    : public Resource::Material
 {
+public:
+	TDECLARE_CLASS( SkinMaterial, Resource::Material );
+
 public:
 	virtual void PreRender() OVERRIDE;
 
@@ -84,7 +89,7 @@ public:
 		m_pTexture = pTexture;
 	}
 
-	Resource::StreamedTexture* AccessTexture() { return m_pTexture; }
+	Resource::StreamedTexture* AccessTexture() { return m_pTexture.Get(); }
 
 private:
 	Toshi::TOrderTable*                           m_pAssignedOrderTable;
@@ -110,8 +115,8 @@ public:
 	virtual TBOOL Create() OVERRIDE;
 	virtual void  Render( Toshi::TRenderPacket* a_pRenderPacket ) OVERRIDE;
 
-	SkinMesh*     CreateMesh();
-	SkinMaterial* CreateMaterial();
+	SkinMesh*                        CreateMesh();
+	Toshi::T2SharedPtr<SkinMaterial> CreateMaterial();
 
 private:
 	Toshi::T2CompiledShader m_hVertexShader;
