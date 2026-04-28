@@ -34,9 +34,10 @@ public:
 	void SerializeModelInformation( tinyxml2::XMLDocument* pOutput );
 
 private:
-	Toshi::T2FormatString64       m_strAnimationsId;
-	Toshi::T2FormatString64       m_strLeftSideSplitId;
-	Toshi::T2FormatString64       m_strPropertiesId;
+	Toshi::T2FormatString64       m_strDockspaceId;
+	Toshi::T2FormatString64       m_strSequencesId;
+	Toshi::T2FormatString64       m_strViewportId;
+	Toshi::T2FormatString64       m_strPreferencesId;
 	ResourceLoader::ModelInstance m_ModelInstance;
 	TINT                          m_iSelectedSequence;
 
@@ -53,5 +54,16 @@ private:
 	TFLOAT          m_fCameraRotY;
 	TFLOAT          m_fCameraFOV;
 
-	TBOOL m_bWireFrame;
+	TBOOL m_bDockingSetUp;
+
+	TBOOL  m_bWireFrame;
+	TFLOAT m_flWireframeThickness;
+
+	TBOOL m_bDisableTextures;
+
+	Toshi::TVector4 m_vViewportColor;
+
+	ImGuiID m_DockRight;
+	ImGuiID m_DockLeftBottom;
+	ImGuiID m_DockLeft;
 };

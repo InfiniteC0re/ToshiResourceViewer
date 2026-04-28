@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ModelResourceView.h"
 #include "Shader/Mesh.h"
+#include "Shader/RendererSettings.h"
 #include "Application.h"
 
 #include <Render/TTMDWin.h>
@@ -32,6 +33,10 @@ ModelResourceView::ModelResourceView()
     , m_iSelectedSequence( -1 )
     , m_bAutoSaveTKL( TFALSE )
     , m_bWireFrame( TFALSE )
+    , m_bDockingSetUp( TFALSE )
+    , m_flWireframeThickness( 1.0f )
+    , m_bDisableTextures( TFALSE )
+    , m_vViewportColor( 0.18f, 0.185f, 0.20f, 1.0f )
 {
 	m_ViewportFrameBuffer.Create();
 	m_ViewportFrameBuffer.CreateDepthTexture( 1920, 1080 );
@@ -47,7 +52,10 @@ ModelResourceView::~ModelResourceView()
 TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 {
 	// Create unique IDs
-	m_strAnimationsId.Format( "##Animations%u", GetImGuiID() );
+	m_strDockspaceId.Format( "##Dockspace%u", GetImGuiID() );
+	m_strSequencesId.Format( "Sequences##Sequences%u", GetImGuiID() );
+	m_strViewportId.Format( "Viewport##Viewport%u", GetImGuiID() );
+	m_strPreferencesId.Format( "Scene##Preferences%u", GetImGuiID() );
 
 	if ( m_bIsExternal )
 	{
@@ -331,13 +339,45 @@ void ModelResourceView::OnDestroy()
 
 void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 {
-	ImVec2 vInitialPos = ImGui::GetCursorPos();
+	const ImVec2  vInitialPos = ImGui::GetCursorPos();
+	const ImGuiID dockSpaceID = ImGui::GetID( m_strDockspaceId.Get() );
 
-	ImGui::Text( "Sequences" );
-	ImGui::BeginChild( m_strAnimationsId.Get(), ImVec2( 200, -1 ), ImGuiChildFlags_ResizeX );
+	ImGuiWindowClass windowClass;
+	windowClass.ClassId = GetImGuiID();
+
+	// Create dockspace for the resource view window
+	ImGui::SetNextWindowClass( &windowClass );
+	ImGui::DockSpace( dockSpaceID );
+
+	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 12.0f ) );
+
+	if ( !m_bDockingSetUp )
+	{
+		// Clear just in case
+		ImGui::DockBuilderRemoveNode( dockSpaceID );
+
+		// Create root node and set initial size
+		ImGuiID dockRoot = ImGui::DockBuilderAddNode( dockSpaceID, ImGuiDockNodeFlags_DockSpace );
+		ImGui::DockBuilderSetNodeSize( dockSpaceID, ImGui::GetWindowSize() );
+
+		// Start splitting the UI
+		m_DockLeft = ImGui::DockBuilderSplitNode( dockSpaceID, ImGuiDir_Left, 0.5f, TNULL, &m_DockRight );
+		m_DockLeft = ImGui::DockBuilderSplitNode( m_DockLeft, ImGuiDir_Up, 0.6f, TNULL, &m_DockLeftBottom );
+
+		// Finally, dock the windows
+		ImGui::DockBuilderDockWindow( m_strSequencesId.Get(), m_DockLeft );
+		ImGui::DockBuilderDockWindow( m_strPreferencesId.Get(), m_DockLeftBottom );
+		ImGui::DockBuilderDockWindow( m_strViewportId.Get(), m_DockRight );
+		
+		ImGui::DockBuilderFinish( dockSpaceID );
+		m_bDockingSetUp = TTRUE;
+	}
+
+	ImGui::SetNextWindowClass( &windowClass );
+	ImGui::Begin( m_strSequencesId.Get() );
 	{
 		ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0, 0, 0, 0 ) );
-		if ( ImGui::BeginListBox( "AnimationList", ImVec2( -1, -1 ) ) )
+		if ( ImGui::BeginListBox( "##AnimationList", ImVec2( -1, -1 ) ) )
 		{
 			TSkeleton* pSkeleton = m_ModelInstance.pModel->pSkeleton;
 
@@ -367,231 +407,275 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		}
 		ImGui::PopStyleColor();
 
-		ImGui::EndChild();
+		ImGui::End();
 	}
 
-	ImGui::SameLine();
-	ImVec2 vPreviewPos = ImGui::GetCursorPos();
-	ImGui::SetCursorPos( ImVec2( vPreviewPos.x, vInitialPos.y ) );
-	ImGui::Text( "Preview" );
-	ImGui::SameLine();
+	//ImGui::SameLine();
+	//ImVec2 vPreviewPos = ImGui::GetCursorPos();
+	//ImGui::SetCursorPos( ImVec2( vPreviewPos.x, vInitialPos.y ) );
+	//ImGui::Text( "Preview" );
+	//ImGui::SameLine();
 
-	ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Export" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
-	if (ImGui::SmallButton("Export"))
+	//ImGui::SetCursorPos( ImVec2( ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( "Export" ).x - ImGui::GetStyle().FramePadding.x * 2, vInitialPos.y ) );
+	//if (ImGui::SmallButton("Export"))
+	//{
+	//	tinygltf::Model gltfModel;
+	//	ExportScene( gltfModel );
+
+	//	// Write to the file
+	//	tinygltf::TinyGLTF gltfWriter;
+	//	gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
+	//}
+
+	ImGui::SetNextWindowClass( &windowClass );
+	ImGui::Begin( m_strViewportId.Get() );
 	{
-		tinygltf::Model gltfModel;
-		ExportScene( gltfModel );
+		// Prepare camera
+		TVector3& oCamTranslation = m_oCamera->GetTranslation();
 
-		// Write to the file
-		tinygltf::TinyGLTF gltfWriter;
-		gltfWriter.WriteGltfSceneToFile( &gltfModel, "D:\\exported.gltf", TFALSE, TTRUE, TTRUE, TFALSE );
-	}
+		m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
+		m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
+		m_oCamera.SetFarPlane( 2000.0f );
 
-	// Prepare camera
-	TVector3& oCamTranslation = m_oCamera->GetTranslation();
+		// Arcball camera behaviour
+		TMatrix44 oCameraMatrix;
+		oCameraMatrix.Identity();
 
-	m_fCameraDistance = TMath::LERPClamped( m_fCameraDistance, m_fCameraDistanceTarget, TMath::Max( TMath::Abs( m_fCameraDistanceTarget - m_fCameraDistance ), 8.0f ) * flDeltaTime );
-	m_oCamera.SetFOV( TMath::DegToRad( m_fCameraFOV ) );
-	m_oCamera.SetFarPlane( 2000.0f );
+		TFLOAT   fCoeff      = 1.0f - TMath::Abs( TMath::Sin( m_fCameraRotY ) );
+		TVector4 vecPosition = TVector4( fCoeff * TMath::Sin( m_fCameraRotX ), TMath::Sin( m_fCameraRotY ), fCoeff * TMath::Cos( m_fCameraRotX ) );
+		vecPosition.Normalise();
+		vecPosition.Multiply( m_fCameraDistance );
 
-	// Arcball camera behaviour
-	TMatrix44 oCameraMatrix;
-	oCameraMatrix.Identity();
+		TVector4 vecDirection = TVector4::VEC_ZERO - vecPosition;
+		vecDirection.Normalise();
 
-	TFLOAT   fCoeff      = 1.0f - TMath::Abs( TMath::Sin( m_fCameraRotY ) );
-	TVector4 vecPosition = TVector4( fCoeff * TMath::Sin( m_fCameraRotX ), TMath::Sin( m_fCameraRotY ), fCoeff * TMath::Cos( m_fCameraRotX ) );
-	vecPosition.Normalise();
-	vecPosition.Multiply( m_fCameraDistance );
-	
-	TVector4 vecDirection = TVector4::VEC_ZERO - vecPosition;
-	vecDirection.Normalise();
+		oCameraMatrix.SetTranslation( vecPosition + m_vecCameraCenter );
+		oCameraMatrix.LookAtDirection( vecDirection, TVector4( 0.0f, 1.0f, 0.0f ) );
 
-	oCameraMatrix.SetTranslation( vecPosition + m_vecCameraCenter );
-	oCameraMatrix.LookAtDirection( vecDirection, TVector4( 0.0f, 1.0f, 0.0f ) );
+		m_oCamera->SetMatrix( oCameraMatrix );
 
-	m_oCamera->SetMatrix( oCameraMatrix );
+		// Update render context
+		//ImGui::SetCursorPos( vPreviewPos );
+		ImVec2 vPreviewPos = ImGui::GetCursorPos();
+		ImVec2 oRegion     = ImGui::GetContentRegionAvail();
 
-	// Update render context
-	ImGui::SetCursorPos( vPreviewPos );
-	ImVec2 oRegion = ImGui::GetContentRegionAvail();
-	
-	g_pRenderGL->SetRenderContext( m_oRenderContext );
-	m_oRenderContext.ForceRefreshFeatures();
+		g_pRenderGL->SetRenderContext( m_oRenderContext );
+		m_oRenderContext.ForceRefreshFeatures();
 
-	m_oRenderContext.GetViewport().SetWidth( oRegion.x );
-	m_oRenderContext.GetViewport().SetHeight( oRegion.y );
+		m_oRenderContext.GetViewport().SetWidth( oRegion.x );
+		m_oRenderContext.GetViewport().SetHeight( oRegion.y );
 
-	m_oRenderContext.SetCamera( m_oCamera );
-	m_oRenderContext.UpdateCamera();
+		m_oRenderContext.SetCamera( m_oCamera );
+		m_oRenderContext.UpdateCamera();
 
-	// Render scene
-	{
-		m_ViewportFrameBuffer.Bind();
-		m_oRenderContext.GetViewport().Begin();
-
-		m_ModelInstance.oTransform.GetLocalMatrixImp( m_oRenderContext.GetModelMatrix() );
-
-		if ( m_ModelInstance.pModel )
+		// Render scene
 		{
-			if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel.Get() ) )
+			m_ViewportFrameBuffer.Bind();
+			m_oRenderContext.GetViewport().SetClearColor( m_vViewportColor );
+			m_oRenderContext.GetViewport().Begin();
+
+			m_ModelInstance.oTransform.GetLocalMatrixImp( m_oRenderContext.GetModelMatrix() );
+
+			if ( m_ModelInstance.pModel )
 			{
-				m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
-				
-				if ( m_iSelectedSequence != -1 && !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
-					m_ModelInstance.pSkeletonInstance->AddAnimationFull( m_iSelectedSequence, 1.0f, 0.0f, 0.0f, TAnimation::Flags_Managed );
-
-				m_ModelInstance.pSkeletonInstance->UpdateTime( flDeltaTime );
-
-				if ( m_iSelectedSequence == -1 || m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+				if ( m_ModelInstance.pSkeletonInstance && ResourceLoader::Model_PrepareAnimations( m_ModelInstance.pModel.Get() ) )
+				{
 					m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
 
-				m_oRenderContext.SetSkeletonInstance( m_ModelInstance.pSkeletonInstance );
+					if ( m_iSelectedSequence != -1 && !m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+						m_ModelInstance.pSkeletonInstance->AddAnimationFull( m_iSelectedSequence, 1.0f, 0.0f, 0.0f, TAnimation::Flags_Managed );
+
+					m_ModelInstance.pSkeletonInstance->UpdateTime( flDeltaTime );
+
+					if ( m_iSelectedSequence == -1 || m_ModelInstance.pSkeletonInstance->IsAnyAnimationPlaying() )
+						m_ModelInstance.pSkeletonInstance->UpdateState( TTRUE );
+
+					m_oRenderContext.SetSkeletonInstance( m_ModelInstance.pSkeletonInstance );
+				}
+
+				if ( !m_bWireFrame || m_flWireframeThickness >= 0.5f )
+					m_ModelInstance.pModel->Render();
 			}
 
-
-			m_ModelInstance.pModel->Render();
-		}
-	
-		if ( m_bWireFrame )
-		{
-			glLineWidth( 3.0f );
-			glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
-		}
-		else
-		{
-			glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-		}
-
-		g_pRenderGL->FlushOrderTables();
-		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-
-		m_oRenderContext.GetViewport().End();
-		m_ViewportFrameBuffer.Unbind();
-	}
-
-	g_pRenderGL->SetDefaultRenderContext();
-
-	// Render to the viewport
-	ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( oRegion.x, oRegion.y ), ImVec2( 0.0f, oRegion.y / 1080.0f ), ImVec2( oRegion.x / 1920.0f, 0.0f ) );
-
-	// Control camera
-	if ( ImGui::IsWindowHovered() )
-	{
-		m_fCameraDistanceTarget -= ImGui::GetIO().MouseWheel * 0.25f;
-		TMath::Clip( m_fCameraDistanceTarget, 0.0f, 50.0f );
-		
-		static TBOOL s_bWasDragging = TFALSE;
-		TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Right );
-		
-		if ( bIsDragging )
-		{
-			static ImVec2 s_vLastPos  = ImGui::GetMousePos();
-			ImVec2        vCurrentPos = ImGui::GetMousePos();
-			ImVec2        vDrag       = ImVec2( s_vLastPos.x - vCurrentPos.x, s_vLastPos.y - vCurrentPos.y );
-		
-			if ( s_bWasDragging )
+			if ( m_bWireFrame )
 			{
-				if ( !ImGui::IsKeyDown( ImGuiKey_LeftShift ) )
-				{
-					TVector4 vecUpAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_UP );
-					TVector4 vecRightAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_RIGHT );
-					vecUpAxis.Multiply( vDrag.y * 0.0025f );
-					vecRightAxis.Multiply( vDrag.x * 0.0025f );
-
-					m_vecCameraCenter.x += vecUpAxis.x + vecRightAxis.x;
-					m_vecCameraCenter.y += vecUpAxis.y + vecRightAxis.y;
-					m_vecCameraCenter.z += vecUpAxis.z + vecRightAxis.z; 
-				}
-				else
-				{
-					m_fCameraRotX += vDrag.x * 0.005f;
-					m_fCameraRotY -= vDrag.y * 0.0025f;
-
-					TMath::Clip( m_fCameraRotY, -TMath::HALF_PI, TMath::HALF_PI );
-				}
+				glLineWidth( m_flWireframeThickness );
+				glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
 			}
-		
-			// Don't let the event go further
-			ImGui::SetActiveID( ImGui::GetID( GetImGuiID() ), ImGui::GetCurrentWindow() );
-		
-			// Save current pos for the next frame
-			s_vLastPos = vCurrentPos;
+			else
+			{
+				glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+			}
+
+			// Update rendering settings and flush order tables to get the model drawn
+			const TBOOL bDisabledTexturesOld     = g_oRendererSettings.bDisableTextures;
+			g_oRendererSettings.bDisableTextures = m_bDisableTextures;
+			g_pRenderGL->FlushOrderTables();
+			g_oRendererSettings.bDisableTextures = bDisabledTexturesOld;
+
+			// Restore renderer state
+			glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+
+			m_oRenderContext.GetViewport().End();
+			m_ViewportFrameBuffer.Unbind();
 		}
 
-		s_bWasDragging = bIsDragging;
-	}
+		g_pRenderGL->SetDefaultRenderContext();
 
-	// Draw info
-	TINT iNumMessages = 0;
-	TINT iNumInfos = 0;
+		// Render to the viewport
+		ImGui::Image( m_ViewportFrameBuffer.GetAttachment( 0 ), ImVec2( oRegion.x, oRegion.y ), ImVec2( 0.0f, oRegion.y / 1080.0f ), ImVec2( oRegion.x / 1920.0f, 0.0f ) );
 
-	auto fnPrintErrorMessage = [ & ]( const TCHAR* szMessage ) {
-		iNumMessages += 1;
-
-		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.78f, 0.0f, 0.75f ) );
-		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
-		ImGui::Text( szMessage );
-		ImGui::PopStyleColor();
-	};
-
-	auto fnPrintMessage = [ & ]( const TCHAR* szMessage ) {
-		iNumMessages += 1;
-
-		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
-		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 4.0f ) ) );
-		ImGui::Text( szMessage );
-		ImGui::PopStyleColor();
-	};
-
-	auto fnPrintInfo = [ & ]( const TCHAR* szMessage ) {
-		ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
-		ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 8.0f, vPreviewPos.y + ( ImGui::GetFontSize() * iNumInfos + 4.0f ) ) );
-		ImGui::Text( szMessage );
-		ImGui::PopStyleColor();
-
-		iNumInfos += 1;
-	};
-
-	// Stats
-	switch (m_ModelInstance.pModel->eModelType)
-	{
-		case ResourceLoader::ModelType::Skin:
-			fnPrintInfo( "Shader Type: Skin" );
-			break;
-		case ResourceLoader::ModelType::World:
-			fnPrintInfo( "Shader Type: World" );
-			break;
-		case ResourceLoader::ModelType::Grass:
-			fnPrintInfo( "Shader Type: Grass" );
-			break;
-		case ResourceLoader::ModelType::StaticInstance:
-			fnPrintInfo( "Shader Type: Static Instance" );
-			break;
-	}
-
-	if ( m_ModelInstance.pModel->pKeyLib )
-		fnPrintInfo( TString8::VarArgs( "Keylib: %s", m_ModelInstance.pModel->pKeyLib->GetName().GetString() ) );
-
-	fnPrintInfo( TString8::VarArgs( "Frame Time: %.2fms (%d FPS)", flDeltaTime * 1000.0f, TINT( 1.0f / flDeltaTime ) ) );
-
-	// Hints
-	fnPrintMessage( "Hold Right Mouse Button + Shift to rotate camera." );
-	fnPrintMessage( "Hold Right Mouse Button to move camera center." );
-	
-	if ( m_ModelInstance.pModel->pKeyLib && m_ModelInstance.pModel->pKeyLib->IsDummy() )
-	{
-		T2String8::Format( T2String8::ms_aScratchMem, "Missing keyframe library '%s'", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
-		fnPrintErrorMessage( T2String8::ms_aScratchMem );
-	}
-
-	T2_FOREACH( m_ModelInstance.pModel->vecUsedTextures, it )
-	{
-		if ( it->Get() && it->Get()->IsDummy() )
+		// Control camera
+		if ( ImGui::IsWindowHovered() )
 		{
-			T2String8::Format( T2String8::ms_aScratchMem, "Missing texture '%s'", it->Get()->GetTexture().strName.GetString() );
+			m_fCameraDistanceTarget -= ImGui::GetIO().MouseWheel * 0.25f;
+			TMath::Clip( m_fCameraDistanceTarget, 0.0f, 50.0f );
+
+			static TBOOL s_bWasDragging = TFALSE;
+			TBOOL        bIsDragging    = ImGui::IsMouseDown( ImGuiMouseButton_Right );
+
+			if ( bIsDragging )
+			{
+				static ImVec2 s_vLastPos  = ImGui::GetMousePos();
+				ImVec2        vCurrentPos = ImGui::GetMousePos();
+				ImVec2        vDrag       = ImVec2( s_vLastPos.x - vCurrentPos.x, s_vLastPos.y - vCurrentPos.y );
+
+				if ( s_bWasDragging )
+				{
+					if ( !ImGui::IsKeyDown( ImGuiKey_LeftShift ) )
+					{
+						TVector4 vecUpAxis    = oCameraMatrix.AsBasisVector4( BASISVECTOR_UP );
+						TVector4 vecRightAxis = oCameraMatrix.AsBasisVector4( BASISVECTOR_RIGHT );
+						vecUpAxis.Multiply( vDrag.y * 0.0025f );
+						vecRightAxis.Multiply( vDrag.x * 0.0025f );
+
+						m_vecCameraCenter.x += vecUpAxis.x + vecRightAxis.x;
+						m_vecCameraCenter.y += vecUpAxis.y + vecRightAxis.y;
+						m_vecCameraCenter.z += vecUpAxis.z + vecRightAxis.z;
+					}
+					else
+					{
+						m_fCameraRotX += vDrag.x * 0.005f;
+						m_fCameraRotY -= vDrag.y * 0.0025f;
+
+						TMath::Clip( m_fCameraRotY, -TMath::HALF_PI, TMath::HALF_PI );
+					}
+				}
+
+				// Don't let the event go further
+				ImGui::SetActiveID( ImGui::GetID( GetImGuiID() ), ImGui::GetCurrentWindow() );
+
+				// Save current pos for the next frame
+				s_vLastPos = vCurrentPos;
+			}
+
+			s_bWasDragging = bIsDragging;
+		}
+
+		// Draw info
+		TINT iNumMessages = 0;
+		TINT iNumInfos    = 0;
+
+		auto fnPrintErrorMessage = [ & ]( const TCHAR* szMessage ) {
+			iNumMessages += 1;
+
+			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.78f, 0.0f, 0.75f ) );
+			ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 13.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 8.0f ) ) );
+			ImGui::Text( szMessage );
+			ImGui::PopStyleColor();
+		};
+
+		auto fnPrintMessage = [ & ]( const TCHAR* szMessage ) {
+			iNumMessages += 1;
+
+			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
+			ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 13.0f, vPreviewPos.y + ( oRegion.y - ImGui::GetFontSize() * iNumMessages - 8.0f ) ) );
+			ImGui::Text( szMessage );
+			ImGui::PopStyleColor();
+		};
+
+		auto fnPrintInfo = [ & ]( const TCHAR* szMessage ) {
+			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
+			ImGui::SetCursorPos( ImVec2( vPreviewPos.x + 13.0f, vPreviewPos.y + ( ImGui::GetFontSize() * iNumInfos + 8.0f ) ) );
+			ImGui::Text( szMessage );
+			ImGui::PopStyleColor();
+
+			iNumInfos += 1;
+		};
+
+		// Stats
+		switch ( m_ModelInstance.pModel->eModelType )
+		{
+			case ResourceLoader::ModelType::Skin:
+				fnPrintInfo( "Shader Type: Skin" );
+				break;
+			case ResourceLoader::ModelType::World:
+				fnPrintInfo( "Shader Type: World" );
+				break;
+			case ResourceLoader::ModelType::Grass:
+				fnPrintInfo( "Shader Type: Grass" );
+				break;
+			case ResourceLoader::ModelType::StaticInstance:
+				fnPrintInfo( "Shader Type: Static Instance" );
+				break;
+		}
+
+		if ( m_ModelInstance.pModel->pKeyLib )
+			fnPrintInfo( TString8::VarArgs( "Keylib: %s", m_ModelInstance.pModel->pKeyLib->GetName().GetString() ) );
+
+		fnPrintInfo( TString8::VarArgs( "Frame Time: %.2fms (%d FPS)", flDeltaTime * 1000.0f, TINT( 1.0f / flDeltaTime ) ) );
+
+		// Hints
+		fnPrintMessage( "Hold Right Mouse Button + Shift to rotate camera." );
+		fnPrintMessage( "Hold Right Mouse Button to move camera center." );
+
+		if ( m_ModelInstance.pModel->pKeyLib && m_ModelInstance.pModel->pKeyLib->IsDummy() )
+		{
+			T2String8::Format( T2String8::ms_aScratchMem, "Missing keyframe library '%s'", m_ModelInstance.pModel->pKeyLib->GetName().GetString() );
 			fnPrintErrorMessage( T2String8::ms_aScratchMem );
 		}
+
+		T2_FOREACH( m_ModelInstance.pModel->vecUsedTextures, it )
+		{
+			if ( it->Get() && it->Get()->IsDummy() )
+			{
+				T2String8::Format( T2String8::ms_aScratchMem, "Missing texture '%s'", it->Get()->GetTexture().strName.GetString() );
+				fnPrintErrorMessage( T2String8::ms_aScratchMem );
+			}
+		}
+
+		ImGui::End();
 	}
+
+	ImGui::SetNextWindowClass( &windowClass );
+	ImGui::Begin( m_strPreferencesId.Get() );
+	{
+		if ( ImGui::CollapsingHeader( "Rendering" ) )
+		{
+			ImGui::Text( "Polygon Mode" );
+			ImGui::SetNextItemWidth( -1.0f );
+			if ( ImGui::BeginCombo( "##Polygon Mode", m_bWireFrame ? "Wireframe" : "Fill" ) )
+			{
+				if ( ImGui::Selectable( "Fill", !m_bWireFrame ) ) m_bWireFrame = TFALSE;
+				if ( ImGui::Selectable( "Wireframe", m_bWireFrame ) ) m_bWireFrame = TTRUE;
+				ImGui::EndCombo();
+			}
+
+			ImGui::Text( "Wireframe Thickness" );
+			ImGui::SetNextItemWidth( -1.0f );
+			ImGui::SliderFloat( "##Wireframe Thickness", &m_flWireframeThickness, 0.0f, 5.0f, "%.1f" );
+
+			ImGui::SetNextItemWidth( -1.0f );
+			ImGui::Text( "Viewport Background" );
+			ImGui::ColorEdit3( "##Viewport Background", &m_vViewportColor.x );
+
+			ImGui::Checkbox( "Disable Textures", &m_bDisableTextures );
+		}
+
+		ImGui::End();
+	}
+
+	ImGui::PopStyleVar();
 }
 
 void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )

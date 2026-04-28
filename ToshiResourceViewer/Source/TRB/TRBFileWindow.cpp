@@ -195,9 +195,8 @@ void TRBFileWindow::Render( TFLOAT fDeltaTime )
 	ImGuiID uiDockSpaceID = ImGui::GetID( m_strWindowName.GetString() );
 
 	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
-	ImGui::SetNextWindowSize( ImVec2( 640, 480 ), ImGuiCond_Appearing );
+	ImGui::SetNextWindowSize( ImVec2( 800, 600 ), ImGuiCond_Appearing );
 	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
-	ImGui::PopStyleVar();
 
 	ImGui::DockSpace( uiDockSpaceID, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode );
 
@@ -252,6 +251,8 @@ void TRBFileWindow::Render( TFLOAT fDeltaTime )
 	}
 
 	ImGui::End();
+	ImGui::PopStyleVar();
+
 	ImGuiComponent::PostRender();
 }
 

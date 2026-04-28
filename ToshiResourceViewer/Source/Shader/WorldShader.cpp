@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "WorldShader.h"
+#include "RendererSettings.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -383,7 +384,7 @@ TBOOL WorldMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, TSkeletonInsta
 		gltfNode.mesh = i;
 		gltfNode.name = ( vecSubMeshes.Size() == 1 )
 		                    ? GetName()
-		                    : TString8::VarArgs( "%s_SM%u", GetName(), i - iMeshStartIndex ).GetString();
+		                    : TString8::VarArgs( "%s_WM%u", GetName(), i - iMeshStartIndex ).GetString();
 		a_rOutModel.nodes.push_back( std::move( gltfNode ) );
 	}
 
@@ -429,7 +430,7 @@ void WorldMaterial::PreRender()
 	for ( TUINT i = 0; i < MAX_TEXTURES; i++ )
 	{
 		if ( m_aTextures[ i ] )
-			g_pRenderGL->SetTexture2D( i, m_aTextures[ i ]->GetHandle() );
+			g_pRenderGL->SetTexture2D( i, g_oRendererSettings.bDisableTextures ? T2TextureManager::GetSingleton()->GetWhiteTexture()->GetHandle() : m_aTextures[ i ]->GetHandle() );
 	}
 
 	// Update UV animation offsets and wrap to [-1, 1]

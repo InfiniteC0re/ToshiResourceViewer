@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SkinShader.h"
+#include "RendererSettings.h"
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -584,5 +585,5 @@ void SkinMesh::GetMaterialInfo( Toshi::TString8& a_rMatName, Toshi::TString8& a_
 void SkinMaterial::PreRender()
 {
 	if ( m_pTexture )
-		g_pRenderGL->SetTexture2D( 0, m_pTexture->GetHandle() );
+		g_pRenderGL->SetTexture2D( 0, g_oRendererSettings.bDisableTextures ? T2TextureManager::GetSingleton()->GetWhiteTexture()->GetHandle() : m_pTexture->GetHandle() );
 }
