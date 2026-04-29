@@ -1,0 +1,212 @@
+#include "pch.h"
+#include "TextureLoader.h"
+
+//-----------------------------------------------------------------------------
+// Enables memory debugging.
+// Note: Should be the last include!
+//-----------------------------------------------------------------------------
+#include <Core/TMemoryDebugOn.h>
+
+TOSHI_NAMESPACE_USING
+
+TFORCEINLINE TUINT8 Expand5To8( TUINT16 value )
+{
+	return TUINT8( ( value << 3 ) | ( value >> 2 ) );
+}
+
+TFORCEINLINE TUINT8 DecodePS2ClutIndex( TUINT8 index )
+{
+	return TUINT8( ( index & 0xE7u ) | ( ( index & 0x08u ) << 1 ) | ( ( index & 0x10u ) >> 1 ) );
+}
+
+// TFORCEINLINE TUINT8 DecodePS2ClutIndexWide( TUINT8 index )
+// {
+// 	return TUINT8(
+// 	    ( index & 0xEDu ) |
+// 	    ( ( index & 0x02u ) << 3 ) |
+// 	    ( ( index & 0x10u ) >> 3 )
+// 	);
+// }
+// 
+// TFORCEINLINE TUINT8 DecodePS2ClutIndex( TUINT8 index, TUINT uiClutWidth )
+// {
+// 	// TODO: figure out how to decode with clut width >= 0x80
+// 	return uiClutWidth >= 0x80 ? DecodePS2ClutIndexWide( index ) : DecodePS2ClutIndex( index );
+// }
+
+static TBOOL InferPS2TextureDimensions( TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
+{
+	uiOutWidth  = uiGSWidth >> 1;
+	uiOutHeight = uiGSHeight >> 1;
+
+	return TTRUE;
+}
+
+static void UnswizzlePS2PSMT8( const TUINT8* pSrcPixels, TUINT uiSourceSize, TUINT uiWidth, TUINT uiHeight, TUINT uiStorageWidth, TUINT8* pDstPixels )
+{
+	for ( TUINT y = 0; y < uiHeight; y++ )
+	{
+		for ( TUINT x = 0; x < uiWidth; x++ )
+		{
+			const TUINT uiBlockLocation  = ( y & ~0x0Fu ) * uiStorageWidth + ( x & ~0x0Fu ) * 2;
+			const TUINT uiSwapSelector   = ( ( ( y + 2 ) >> 2 ) & 1 ) * 4;
+			const TUINT uiPosY           = ( ( ( y & ~3u ) >> 1 ) + ( y & 1 ) ) & 7;
+			const TUINT uiColumnLocation = uiPosY * uiStorageWidth * 2 + ( ( x + uiSwapSelector ) & 7 ) * 4;
+			const TUINT uiByteNum        = ( ( y >> 1 ) & 1 ) + ( ( x >> 2 ) & 2 );
+			const TUINT uiSrcOffset      = uiBlockLocation + uiColumnLocation + uiByteNum;
+
+			pDstPixels[ y * uiWidth + x ] = uiSrcOffset < uiSourceSize ? pSrcPixels[ uiSrcOffset ] : 0;
+		}
+	}
+}
+
+static void ReorderClut16Block( TUINT16* pDstWords, TUINT uiRowWords, const TUINT16* pSrcWords, TUINT uiSourceStrideWords, TUINT uiTotalBytes )
+{
+	// Barnyard (PS2 Korean): 0x00486388
+	while ( uiTotalBytes != 0 )
+	{
+		uiTotalBytes -= 0x20;
+
+		for ( TUINT i = 0; i < 8; i++ )
+		{
+			pDstWords[ i ] = *pSrcWords;
+			pSrcWords += uiSourceStrideWords;
+		}
+
+		for ( TUINT i = 0; i < 8; i++ )
+		{
+			pDstWords[ uiRowWords + i ] = *pSrcWords;
+			pSrcWords += uiSourceStrideWords;
+		}
+
+		for ( TUINT i = 0; i < 8; i++ )
+		{
+			pDstWords[ 8 + i ] = *pSrcWords;
+			pSrcWords += uiSourceStrideWords;
+		}
+
+		for ( TUINT i = 0; i < 8; i++ )
+		{
+			pDstWords[ uiRowWords + 8 + i ] = *pSrcWords;
+			pSrcWords += uiSourceStrideWords;
+		}
+
+		pDstWords += uiRowWords * 2;
+	}
+}
+
+static TBOOL UploadPS2ClutToMode2Layout( const TUINT8* pClutData, TUINT uiLayoutWidth, TUINT16* pOutClut )
+{
+	if ( pClutData == TNULL || pOutClut == TNULL )
+		return TFALSE;
+
+	const TUINT16* pClutWords = TREINTERPRETCAST( const TUINT16*, pClutData );
+
+	switch (uiLayoutWidth)
+	{
+		case 0x20:
+			ReorderClut16Block( pOutClut, 0x10, pClutWords, 4, 0x20 );
+			ReorderClut16Block( pOutClut + 0x20, 0x10, pClutWords + 1, 4, 0x20 );
+			ReorderClut16Block( pOutClut + 0x40, 0x10, pClutWords + 2, 4, 0x20 );
+			ReorderClut16Block( pOutClut + 0x60, 0x10, pClutWords + 3, 4, 0x20 );
+			break;
+		case 0x40:
+			ReorderClut16Block( pOutClut, 0x10, pClutWords, 4, 0x40 );
+			ReorderClut16Block( pOutClut + 0x40, 0x10, pClutWords + 1, 4, 0x40 );
+			ReorderClut16Block( pOutClut + 0x80, 0x10, pClutWords + 2, 4, 0x40 );
+			ReorderClut16Block( pOutClut + 0xc0, 0x10, pClutWords + 3, 4, 0x40 );
+			break;
+		case 0x80:
+			ReorderClut16Block( pOutClut, 0x20, pClutWords, 4, 0x80 );
+			ReorderClut16Block( pOutClut + 0x100, 0x20, pClutWords + 1, 4, 0x80 );
+			ReorderClut16Block( pOutClut + 0x10, 0x20, pClutWords + 2, 4, 0x80 );
+			ReorderClut16Block( pOutClut + 0x110, 0x20, pClutWords + 3, 4, 0x80 );
+			break;
+		case 0x100:
+			ReorderClut16Block( pOutClut, 0x20, pClutWords, 4, 0x100 );
+			ReorderClut16Block( pOutClut + 0x200, 0x20, pClutWords + 1, 4, 0x100 );
+			ReorderClut16Block( pOutClut + 0x10, 0x20, pClutWords + 2, 4, 0x100 );
+			ReorderClut16Block( pOutClut + 0x210, 0x20, pClutWords + 3, 4, 0x100 );
+			break;
+	}
+
+	return TTRUE;
+}
+
+TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, TString8* pOutName /*= TNULL */ )
+{
+	TTL_PS2* pTTL = TSTATICCAST( TTL_PS2, pData );
+	if ( !pTTL ) return TFALSE;
+
+	TUINT uiNumTextures = CONVERTENDIANESS( eEndianess, pTTL->uiNumTextures );
+	if ( uiNumTextures == 0 ) return TFALSE;
+
+	rOutVector.Reserve( uiNumTextures );
+
+	for ( TUINT i = 0; i < uiNumTextures; i++ )
+	{
+		TTL_PS2::TexInfo* pTex = &pTTL->pTextureInfos[ i ];
+
+		const TUINT uiFormat        = CONVERTENDIANESS( eEndianess, pTex->uiFormat );
+		const TUINT uiGSWidth       = CONVERTENDIANESS( eEndianess, pTex->uiGSWidth );
+		const TUINT uiGSHeight      = CONVERTENDIANESS( eEndianess, pTex->uiGSHeight );
+		const TUINT uiPixelDataSize = CONVERTENDIANESS( eEndianess, pTex->uiPixelDataSize );
+		const TUINT uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
+
+		if ( uiFormat != 0x110 )
+		{
+			TERROR( "TTL_Load_Barnyard_PS2: unsupported texture format 0x%X in '%s'\n", uiFormat, pTex->szFileName );
+			continue;
+		}
+
+		const TUINT8* pRawPixels = TSTATICCAST( const TUINT8, pTex->pPixelData );
+		const TUINT8* pRawClut   = pTex->pCLUT != TNULL
+			? TSTATICCAST( const TUINT8, pTex->pCLUT )
+			: TSTATICCAST( const TUINT8, pTex->pPixelData ) + uiPixelDataSize;
+
+		if ( uiPixelDataSize == 0 || pRawPixels == TNULL || pRawClut == TNULL )
+		{
+			TERROR( "TTL_Load_Barnyard_PS2: missing pixel/CLUT data in '%s'\n", pTex->szFileName );
+			continue;
+		}
+
+		TUINT uiWidth  = 0;
+		TUINT uiHeight = 0;
+		if ( !InferPS2TextureDimensions( uiPixelDataSize, uiGSWidth, uiGSHeight, uiWidth, uiHeight ) )
+		{
+			TERROR( "TTL_Load_Barnyard_PS2: couldn't infer dimensions for '%s' from %u bytes\n", pTex->szFileName, uiPixelDataSize );
+			continue;
+		}
+
+		TUINT16* pReorderedClut = TSTATICCAST( TUINT16, TMalloc( sizeof( TUINT16 ) * ( uiClutWidth * 4 ) ) );
+
+		if ( !UploadPS2ClutToMode2Layout( pRawClut, uiClutWidth, pReorderedClut ) )
+		{
+			TERROR( "TTL_Load_Barnyard_PS2: failed to upload CLUT layout for '%s'\n", pTex->szFileName );
+			TFree( pReorderedClut );
+			continue;
+		}
+
+		TBYTE* pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+		for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+		{
+			TUINT8  uiIndex     = pRawPixels[ px ];
+			TUINT8  uiClutIndex = DecodePS2ClutIndex( uiIndex );
+			TUINT16 uiClutEntry = pReorderedClut[ uiClutIndex ];
+
+			pImgData[ px * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
+			pImgData[ px * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
+			pImgData[ px * 4 + 2 ] = Expand5To8( ( uiClutEntry >> 10 ) & 0x1F );
+			pImgData[ px * 4 + 3 ] = ( uiClutEntry & 0x8000 ) != 0 ? 255 : 0;
+		}
+
+		rOutVector.EmplaceBack(
+		    Resource::StreamedTexture_Create( TPS8D( pTex->szFileName ), TINT( uiWidth ), TINT( uiHeight ), pImgData, bCreateTextures )
+		);
+
+		TFree( pReorderedClut );
+	}
+
+	return TTRUE;
+}

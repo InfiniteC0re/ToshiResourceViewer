@@ -16,6 +16,7 @@ using Textures = Toshi::T2DynamicVector<Toshi::T2SharedPtr<Resource::StreamedTex
 TBOOL TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreateTextures, TBOOL bForcePlatform, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Windows( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 TBOOL TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
+TBOOL TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, Toshi::TString8* pOutName = TNULL );
 
 enum class TextureFileFormat
 {
@@ -51,6 +52,27 @@ struct TTL_Win
 	TexInfo*     pTextureInfos;
 	const TCHAR* szPackName;
 }; // struct TTL_Win
+
+struct TTL_PS2
+{
+	struct TexInfo
+	{
+		TUINT32  uiFormat;
+		TCHAR*   szFileName;
+		TUINT32  uiGSWidth;
+		TUINT32  uiGSHeight;
+		TUINT32  uiLODCount;
+		TBYTE*   pPixelData;
+		TUINT32  uiPixelDataSize;
+		TBYTE*   pCLUT;
+		TUINT32  uiCLUTWidth;
+		TUINT32  uiCLUTHeight;
+		TUINT32  uiMipCount;
+	};
+
+	TUINT32  uiNumTextures;
+	TexInfo* pTextureInfos;
+}; // struct TTL_PS2
 
 struct TTL_Rev
 {

@@ -34,14 +34,17 @@ TBOOL ResourceLoader::TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreate
 
 		if ( eFormat > TTEX_FMT_WIN_BASE && eFormat <= TTEX_FMT_WIN_DDS )
 			return ResourceLoader::TTL_Load_Barnyard_Windows( pData, eEndianess, TTRUE, rOutVector, pOutName );
-		
+
+		if ( eFormat > TTEX_FMT_PS2_BASE && eFormat <= TTEX_FMT_PS2_PSMT8_PSMCT16 )
+			return ResourceLoader::TTL_Load_Barnyard_PS2( pData, eEndianess, TTRUE, rOutVector, pOutName );
+
 		if ( eFormat > TTEX_FMT_REV_BASE && eFormat <= TTEX_FMT_REV_CI8_IA8 )
 			return ResourceLoader::TTL_Load_Barnyard_Rev( pData, eEndianess, TTRUE, rOutVector, pOutName );
-		
+
 		TERROR( "ResourceLoader::TTL_Load: Invalid texture format!\n" );
 		return TFALSE;
 	}
-	
+
 	// Force platform to the current settings
 	TOSHISKU ePlatform = g_oTheApp.GetSelectedPlatform();
 
@@ -50,9 +53,12 @@ TBOOL ResourceLoader::TTL_Load( void* pData, Endianess eEndianess, TBOOL bCreate
 		case TOSHIGAME_BARNYARD:
 			if ( ePlatform == TOSHISKU_WINDOWS )
 				return ResourceLoader::TTL_Load_Barnyard_Windows( pData, eEndianess, TTRUE, rOutVector, pOutName );
-			
+
 			if ( ePlatform == TOSHISKU_REV )
 				return ResourceLoader::TTL_Load_Barnyard_Rev( pData, eEndianess, TTRUE, rOutVector, pOutName );
+
+			if ( ePlatform == TOSHISKU_PS2 )
+				return ResourceLoader::TTL_Load_Barnyard_PS2( pData, eEndianess, TTRUE, rOutVector, pOutName );
 
 			break;
 	}
