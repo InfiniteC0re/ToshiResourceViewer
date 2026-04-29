@@ -66,7 +66,9 @@ void TextureTool::Render()
 		for ( const auto& entry : std::filesystem::directory_iterator( s_DirInBuffer ) )
 		{
 			if ( !entry.path().extension().compare( ".trb" ) ||
-				 !entry.path().extension().compare( ".ttl" ) )
+			     !entry.path().extension().compare( ".TRB" ) ||
+			     !entry.path().extension().compare( ".ttl" ) ||
+			     !entry.path().extension().compare( ".TTL" ) )
 			{
 				char szPath[ MAX_PATH ];
 				TStringManager::StringUnicodeToChar( szPath, entry.path().native().c_str(), -1 );

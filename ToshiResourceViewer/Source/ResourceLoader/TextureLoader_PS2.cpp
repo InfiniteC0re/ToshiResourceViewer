@@ -9,30 +9,43 @@
 
 TOSHI_NAMESPACE_USING
 
-TFORCEINLINE TUINT8 Expand5To8( TUINT16 value )
+static TFORCEINLINE TUINT8 Expand5To8( TUINT16 value )
 {
 	return TUINT8( ( value << 3 ) | ( value >> 2 ) );
 }
 
-TFORCEINLINE TUINT8 DecodePS2ClutIndex( TUINT8 index )
+static TUINT DecodePS2ClutIndexForLayout( TUINT8 uiIndex, TUINT uiClutWidth )
 {
-	return TUINT8( ( index & 0xE7u ) | ( ( index & 0x08u ) << 1 ) | ( ( index & 0x10u ) >> 1 ) );
-}
+	switch (uiClutWidth)
+	{
+		case 0x20:
+		case 0x40:
+			return TUINT8( ( uiIndex & 0xE7u ) | ( ( uiIndex & 0x08u ) << 1 ) | ( ( uiIndex & 0x10u ) >> 1 ) );
 
-// TFORCEINLINE TUINT8 DecodePS2ClutIndexWide( TUINT8 index )
-// {
-// 	return TUINT8(
-// 	    ( index & 0xEDu ) |
-// 	    ( ( index & 0x02u ) << 3 ) |
-// 	    ( ( index & 0x10u ) >> 3 )
-// 	);
-// }
-// 
-// TFORCEINLINE TUINT8 DecodePS2ClutIndex( TUINT8 index, TUINT uiClutWidth )
-// {
-// 	// TODO: figure out how to decode with clut width >= 0x80
-// 	return uiClutWidth >= 0x80 ? DecodePS2ClutIndexWide( index ) : DecodePS2ClutIndex( index );
-// }
+		case 0x80:
+			// source bits 01234567 -> destination bits 01253674
+			return TUINT(
+			    ( uiIndex & 0x07u ) |
+			    ( ( uiIndex & 0x08u ) << 2 ) |
+			    ( ( uiIndex & 0x10u ) >> 1 ) |
+			    ( ( uiIndex & 0x20u ) << 1 ) |
+			    ( ( uiIndex & 0x40u ) << 1 ) |
+			    ( ( uiIndex & 0x80u ) >> 3 )
+			);
+
+		case 0x100:
+			// source bits 01234567 -> destination bits 01253678, with destination bit 9 set
+			return TUINT(
+			    0x200u |
+			    ( uiIndex & 0x07u ) |
+			    ( ( uiIndex & 0x08u ) << 2 ) |
+			    ( ( uiIndex & 0x10u ) >> 1 ) |
+			    ( ( uiIndex & 0x20u ) << 1 ) |
+			    ( ( uiIndex & 0x40u ) << 1 ) |
+			    ( ( uiIndex & 0x80u ) << 1 )
+			);
+	}
+}
 
 static TBOOL InferPS2TextureDimensions( TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
 {
@@ -40,24 +53,6 @@ static TBOOL InferPS2TextureDimensions( TUINT uiPixelDataSize, TUINT uiGSWidth, 
 	uiOutHeight = uiGSHeight >> 1;
 
 	return TTRUE;
-}
-
-static void UnswizzlePS2PSMT8( const TUINT8* pSrcPixels, TUINT uiSourceSize, TUINT uiWidth, TUINT uiHeight, TUINT uiStorageWidth, TUINT8* pDstPixels )
-{
-	for ( TUINT y = 0; y < uiHeight; y++ )
-	{
-		for ( TUINT x = 0; x < uiWidth; x++ )
-		{
-			const TUINT uiBlockLocation  = ( y & ~0x0Fu ) * uiStorageWidth + ( x & ~0x0Fu ) * 2;
-			const TUINT uiSwapSelector   = ( ( ( y + 2 ) >> 2 ) & 1 ) * 4;
-			const TUINT uiPosY           = ( ( ( y & ~3u ) >> 1 ) + ( y & 1 ) ) & 7;
-			const TUINT uiColumnLocation = uiPosY * uiStorageWidth * 2 + ( ( x + uiSwapSelector ) & 7 ) * 4;
-			const TUINT uiByteNum        = ( ( y >> 1 ) & 1 ) + ( ( x >> 2 ) & 2 );
-			const TUINT uiSrcOffset      = uiBlockLocation + uiColumnLocation + uiByteNum;
-
-			pDstPixels[ y * uiWidth + x ] = uiSrcOffset < uiSourceSize ? pSrcPixels[ uiSrcOffset ] : 0;
-		}
-	}
 }
 
 static void ReorderClut16Block( TUINT16* pDstWords, TUINT uiRowWords, const TUINT16* pSrcWords, TUINT uiSourceStrideWords, TUINT uiTotalBytes )
@@ -152,6 +147,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 		const TUINT uiGSHeight      = CONVERTENDIANESS( eEndianess, pTex->uiGSHeight );
 		const TUINT uiPixelDataSize = CONVERTENDIANESS( eEndianess, pTex->uiPixelDataSize );
 		const TUINT uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
+		const TUINT uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
 
 		if ( uiFormat != 0x110 )
 		{
@@ -178,7 +174,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 			continue;
 		}
 
-		TUINT16* pReorderedClut = TSTATICCAST( TUINT16, TMalloc( sizeof( TUINT16 ) * ( uiClutWidth * 4 ) ) );
+		TUINT16* pReorderedClut = TSTATICCAST( TUINT16, TMalloc( sizeof( TUINT16 ) * uiClutWidth * uiClutHeight ) );
 
 		if ( !UploadPS2ClutToMode2Layout( pRawClut, uiClutWidth, pReorderedClut ) )
 		{
@@ -191,9 +187,8 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
 		{
-			TUINT8  uiIndex     = pRawPixels[ px ];
-			TUINT8  uiClutIndex = DecodePS2ClutIndex( uiIndex );
-			TUINT16 uiClutEntry = pReorderedClut[ uiClutIndex ];
+			const TUINT uiClutIndex = DecodePS2ClutIndexForLayout( pRawPixels[ px ], uiClutWidth );
+			TUINT16     uiClutEntry = pReorderedClut[ uiClutIndex ];
 
 			pImgData[ px * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
 			pImgData[ px * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
