@@ -45,12 +45,22 @@ static TUINT DecodePS2ClutIndexForLayout( TUINT8 uiIndex, TUINT uiClutWidth )
 			    ( ( uiIndex & 0x80u ) << 1 )
 			);
 	}
+
+	return uiIndex;
 }
 
-static TBOOL InferPS2TextureDimensions( TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
+static TBOOL InferPS2TextureDimensions( TUINT uiFormat, TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
 {
-	uiOutWidth  = uiGSWidth >> 1;
-	uiOutHeight = uiGSHeight >> 1;
+	if ( uiFormat == TTEX_FMT_PS2_PSMT8_RGB888 )
+	{
+		uiOutWidth  = uiGSWidth;
+		uiOutHeight = uiGSHeight;
+	}
+	else
+	{
+		uiOutWidth  = uiGSWidth >> 1;
+		uiOutHeight = uiGSHeight >> 1;
+	}
 
 	return TTRUE;
 }
@@ -149,7 +159,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 		const TUINT uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
 		const TUINT uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
 
-		if ( uiFormat != 0x110 )
+		if ( uiFormat != TTEX_FMT_PS2_PSMT8_RGB888 && uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT16 )
 		{
 			TERROR( "TTL_Load_Barnyard_PS2: unsupported texture format 0x%X in '%s'\n", uiFormat, pTex->szFileName );
 			continue;
@@ -168,39 +178,67 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		TUINT uiWidth  = 0;
 		TUINT uiHeight = 0;
-		if ( !InferPS2TextureDimensions( uiPixelDataSize, uiGSWidth, uiGSHeight, uiWidth, uiHeight ) )
+		if ( !InferPS2TextureDimensions( uiFormat, uiPixelDataSize, uiGSWidth, uiGSHeight, uiWidth, uiHeight ) )
 		{
 			TERROR( "TTL_Load_Barnyard_PS2: couldn't infer dimensions for '%s' from %u bytes\n", pTex->szFileName, uiPixelDataSize );
 			continue;
 		}
 
-		TUINT16* pReorderedClut = TSTATICCAST( TUINT16, TMalloc( sizeof( TUINT16 ) * uiClutWidth * uiClutHeight ) );
+		// Result image data
+		TBYTE* pImgData = TNULL;
 
-		if ( !UploadPS2ClutToMode2Layout( pRawClut, uiClutWidth, pReorderedClut ) )
+		switch (uiFormat)
 		{
-			TERROR( "TTL_Load_Barnyard_PS2: failed to upload CLUT layout for '%s'\n", pTex->szFileName );
-			TFree( pReorderedClut );
-			continue;
+			case TTEX_FMT_PS2_PSMT8_RGB888:
+			{
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					const TUINT8* pColor   = pRawClut + pRawPixels[ px ] * 3;
+					pImgData[ px * 4 + 0 ] = pColor[ 0 ];
+					pImgData[ px * 4 + 1 ] = pColor[ 1 ];
+					pImgData[ px * 4 + 2 ] = pColor[ 2 ];
+					pImgData[ px * 4 + 3 ] = 255;
+				}
+
+				break;
+			}
+			
+			case TTEX_FMT_PS2_PSMT8_PSMCT16:
+			{
+				const TUINT uiClutEntries  = uiClutWidth * uiClutHeight;
+				TUINT16*    pReorderedClut = TSTATICCAST( TUINT16, TMalloc( sizeof( TUINT16 ) * uiClutEntries ) );
+
+				if ( !UploadPS2ClutToMode2Layout( pRawClut, uiClutWidth, pReorderedClut ) )
+				{
+					TERROR( "TTL_Load_Barnyard_PS2: failed to upload CLUT layout for '%s'\n", pTex->szFileName );
+					TFree( pReorderedClut );
+					continue;
+				}
+
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					const TUINT uiClutIndex = DecodePS2ClutIndexForLayout( pRawPixels[ px ], uiClutWidth );
+					TUINT16     uiClutEntry = uiClutIndex < uiClutEntries ? pReorderedClut[ uiClutIndex ] : 0xFC1F;
+
+					pImgData[ px * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
+					pImgData[ px * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
+					pImgData[ px * 4 + 2 ] = Expand5To8( ( uiClutEntry >> 10 ) & 0x1F );
+					pImgData[ px * 4 + 3 ] = ( uiClutEntry & 0x8000 ) != 0 ? 255 : 0;
+				}
+
+				TFree( pReorderedClut );
+				break;
+			}
 		}
 
-		TBYTE* pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
-
-		for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
-		{
-			const TUINT uiClutIndex = DecodePS2ClutIndexForLayout( pRawPixels[ px ], uiClutWidth );
-			TUINT16     uiClutEntry = pReorderedClut[ uiClutIndex ];
-
-			pImgData[ px * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
-			pImgData[ px * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
-			pImgData[ px * 4 + 2 ] = Expand5To8( ( uiClutEntry >> 10 ) & 0x1F );
-			pImgData[ px * 4 + 3 ] = ( uiClutEntry & 0x8000 ) != 0 ? 255 : 0;
-		}
-
+		TASSERT( pImgData != TNULL );
 		rOutVector.EmplaceBack(
 		    Resource::StreamedTexture_Create( TPS8D( pTex->szFileName ), TINT( uiWidth ), TINT( uiHeight ), pImgData, bCreateTextures )
 		);
-
-		TFree( pReorderedClut );
 	}
 
 	return TTRUE;
