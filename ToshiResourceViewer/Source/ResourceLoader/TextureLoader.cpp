@@ -103,7 +103,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Windows( void* pData, Endianess eEndiane
 		pSoilData = TNULL;
 
 		rOutVector.EmplaceBack(
-		    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), iWidth, iHeight, pImgData, bCreateTextures )
+		    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), pTTL->pTextureInfos[ i ].eFormat, iWidth, iHeight, pImgData, bCreateTextures )
 		);
 	}
 
@@ -224,7 +224,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 			TUtil::MemCopy( pData, *image.getData(), image.getData().capacity() );
 
 			rOutVector.EmplaceBack(
-			    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), TINT( uiWidth ), TINT( uiHeight ), pData, bCreateTextures )
+			    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), pTTL->pTextureInfos[ i ].eFormat, TINT( uiWidth ), TINT( uiHeight ), pData, bCreateTextures )
 			);
 		}
 		catch ( CTLib::ImageError error )

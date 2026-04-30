@@ -104,10 +104,12 @@ void TextureResourceView::OnRender( TFLOAT flDeltaTime )
 
 			// Draw info
 			ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 1.0f, 1.0f, 0.5f ) );
-			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 2 - 8.0f ) );
+			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 3 - 8.0f ) );
 			ImGui::Text( "Scale: %.2f", m_fScale );
-			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() - 8.0f ) );
+			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 2 - 8.0f ) );
 			ImGui::Text( "Width: %d, Height: %d", texInfo->GetTexture().iWidth, texInfo->GetTexture().iHeight );
+			ImGui::SetCursorPos( ImVec2( 12.0f, oRegion.y - ImGui::GetFontSize() * 1 - 8.0f ) );
+			ImGui::Text( "Format: %s", TTEXTURE_FORMAT_TO_STRING( texInfo->GetFormat() ) );
 			ImGui::PopStyleColor();
 
 			// Control scale and offset

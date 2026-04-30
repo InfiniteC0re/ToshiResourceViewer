@@ -19,12 +19,13 @@ Resource::StreamedTexture::~StreamedTexture()
 	Destroy();
 }
 
-void Resource::StreamedTexture::Setup( const Toshi::TPString8& strName, TINT iWidth, TINT iHeight, const void* pData )
+void Resource::StreamedTexture::Setup( const Toshi::TPString8& strName, Toshi::TTEXTURE_FORMAT eFormat, TINT iWidth, TINT iHeight, const void* pData )
 {
 	m_oTexture.strName = strName;
 	m_oTexture.iWidth  = iWidth;
 	m_oTexture.iHeight = iHeight;
 	m_oTexture.pData   = pData;
+	m_oTexture.eFormat = eFormat;
 }
 
 TBOOL Resource::StreamedTexture::Create()
@@ -99,7 +100,7 @@ Resource::StreamedTextureMap::Iterator Resource::StreamedTexture_GetIteratorEnd(
 	return g_mapStreamedTextures.End();
 }
 
-T2SharedPtr<Resource::StreamedTexture> Resource::StreamedTexture_Create( const TPString8& strName, TINT iWidth, TINT iHeight, const void* pData, TBOOL bCreateTexture )
+T2SharedPtr<Resource::StreamedTexture> Resource::StreamedTexture_Create( const TPString8& strName, Toshi::TTEXTURE_FORMAT eFormat, TINT iWidth, TINT iHeight, const void* pData, TBOOL bCreateTexture )
 {
 	// See if the texture is already created
 	auto it = g_mapStreamedTextures.Find( strName );
@@ -113,7 +114,7 @@ T2SharedPtr<Resource::StreamedTexture> Resource::StreamedTexture_Create( const T
 			if ( it->second->IsDummy() )
 			{
 				// Complete the texture with real data
-				it->second->Setup( strName, iWidth, iHeight, pData );
+				it->second->Setup( strName, eFormat, iWidth, iHeight, pData );
 
 				if ( bCreateTexture )
 					it->second->Create();
@@ -126,7 +127,7 @@ T2SharedPtr<Resource::StreamedTexture> Resource::StreamedTexture_Create( const T
 	// Create new real texture
 	auto pTexture = T2SharedPtr<Resource::StreamedTexture>::New();
 	
-	pTexture->Setup( strName, iWidth, iHeight, pData );
+	pTexture->Setup( strName, eFormat, iWidth, iHeight, pData );
 
 	if ( bCreateTexture )
 		pTexture->Create();

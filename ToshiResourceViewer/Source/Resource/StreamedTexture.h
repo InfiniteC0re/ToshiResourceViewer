@@ -11,11 +11,12 @@ namespace Resource
 
 struct Texture
 {
-	Toshi::TPString8   strName;
-	Toshi::T2GLTexture pHandle;
-	TINT               iWidth  = 0;
-	TINT               iHeight = 0;
-	const void*        pData   = TNULL;
+	Toshi::TPString8       strName;
+	Toshi::T2GLTexture     pHandle;
+	Toshi::TTEXTURE_FORMAT eFormat;
+	TINT                   iWidth  = 0;
+	TINT                   iHeight = 0;
+	const void*            pData   = TNULL;
 };
 
 class StreamedTexture
@@ -24,15 +25,16 @@ public:
 	StreamedTexture();
 	~StreamedTexture();
 
-	void  Setup( const Toshi::TPString8& strName, TINT iWidth, TINT iHeight, const void* pData );
+	void  Setup( const Toshi::TPString8& strName, Toshi::TTEXTURE_FORMAT eFormat, TINT iWidth, TINT iHeight, const void* pData );
 	TBOOL Create();
 	void  Destroy();
 
-	GLuint              GetHandle();
-	TBOOL               IsLoaded() const { return m_bCreated; }
-	TBOOL               IsDummy() const { return !m_bCreated; }
-	Texture&            GetTexture() { return m_oTexture; }
-	const Texture&      GetTexture() const { return m_oTexture; }
+	GLuint                 GetHandle();
+	TBOOL                  IsLoaded() const { return m_bCreated; }
+	TBOOL                  IsDummy() const { return !m_bCreated; }
+	Texture&               GetTexture() { return m_oTexture; }
+	const Texture&         GetTexture() const { return m_oTexture; }
+	Toshi::TTEXTURE_FORMAT GetFormat() const { return m_oTexture.eFormat; }
 
 private:
 	Texture            m_oTexture;
@@ -46,7 +48,7 @@ TINT                         StreamedTexture_GetTotalNumber();
 StreamedTextureMap::Iterator StreamedTexture_GetIteratorBegin();
 StreamedTextureMap::Iterator StreamedTexture_GetIteratorEnd();
 
-Toshi::T2SharedPtr<StreamedTexture> StreamedTexture_Create( const Toshi::TPString8& strName, TINT iWidth, TINT iHeight, const void* pData, TBOOL bCreateTexture );
+Toshi::T2SharedPtr<StreamedTexture> StreamedTexture_Create( const Toshi::TPString8& strName, Toshi::TTEXTURE_FORMAT eFormat, TINT iWidth, TINT iHeight, const void* pData, TBOOL bCreateTexture );
 Toshi::T2SharedPtr<StreamedTexture> StreamedTexture_FindOrCreateDummy( const Toshi::TPString8& strName );
 
 } // namespace Resource

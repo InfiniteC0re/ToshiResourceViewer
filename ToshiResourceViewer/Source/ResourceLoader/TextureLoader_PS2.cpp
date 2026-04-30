@@ -135,9 +135,9 @@ static TUINT DecodePS2Mode1ClutIndex( TUINT8 uiIndex, TUINT uiClutEntries )
 	    uiClutEntries;
 }
 
-static TBOOL InferPS2TextureDimensions( TUINT uiFormat, TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
+static TBOOL InferPS2TextureDimensions( TUINT eFormat, TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
 {
-	switch ( uiFormat )
+	switch ( eFormat )
 	{
 		case TTEX_FMT_PS2_PSMCT32:
 		case TTEX_FMT_PS2_PSMT8_PSMCT32:
@@ -426,23 +426,23 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 	{
 		TTL_PS2::TexInfo* pTex = &pTTL->pTextureInfos[ i ];
 
-		const TUINT uiFormat        = CONVERTENDIANESS( eEndianess, pTex->uiFormat );
-		const TUINT uiGSWidth       = CONVERTENDIANESS( eEndianess, pTex->uiGSWidth );
-		const TUINT uiGSHeight      = CONVERTENDIANESS( eEndianess, pTex->uiGSHeight );
-		const TUINT uiPixelDataSize = CONVERTENDIANESS( eEndianess, pTex->uiPixelDataSize );
-		const TUINT uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
-		const TUINT uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
+		const TTEXTURE_FORMAT eFormat         = TCAST( TTEXTURE_FORMAT, CONVERTENDIANESS( eEndianess, pTex->uiFormat ) );
+		const TUINT           uiGSWidth       = CONVERTENDIANESS( eEndianess, pTex->uiGSWidth );
+		const TUINT           uiGSHeight      = CONVERTENDIANESS( eEndianess, pTex->uiGSHeight );
+		const TUINT           uiPixelDataSize = CONVERTENDIANESS( eEndianess, pTex->uiPixelDataSize );
+		const TUINT           uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
+		const TUINT           uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
 
-		if ( uiFormat != TTEX_FMT_PS2_PSMCT32 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT32 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT8_RGB888 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT4_PSMCT32 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT4_PSMCT16 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT4_PSMCT16_TILED &&
-		     uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT24 &&
-		     uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT16 )
+		if ( eFormat != TTEX_FMT_PS2_PSMCT32 &&
+		     eFormat != TTEX_FMT_PS2_PSMT8_PSMCT32 &&
+		     eFormat != TTEX_FMT_PS2_PSMT8_RGB888 &&
+		     eFormat != TTEX_FMT_PS2_PSMT4_PSMCT32 &&
+		     eFormat != TTEX_FMT_PS2_PSMT4_PSMCT16 &&
+		     eFormat != TTEX_FMT_PS2_PSMT4_PSMCT16_TILED &&
+		     eFormat != TTEX_FMT_PS2_PSMT8_PSMCT24 &&
+		     eFormat != TTEX_FMT_PS2_PSMT8_PSMCT16 )
 		{
-			TERROR( "TTL_Load_Barnyard_PS2: unsupported texture format 0x%X in '%s'\n", uiFormat, pTex->szFileName );
+			TERROR( "TTL_Load_Barnyard_PS2: unsupported texture format 0x%X in '%s'\n", eFormat, pTex->szFileName );
 			continue;
 		}
 
@@ -457,7 +457,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		TUINT uiWidth  = 0;
 		TUINT uiHeight = 0;
-		if ( !InferPS2TextureDimensions( uiFormat, uiPixelDataSize, uiGSWidth, uiGSHeight, uiWidth, uiHeight ) )
+		if ( !InferPS2TextureDimensions( eFormat, uiPixelDataSize, uiGSWidth, uiGSHeight, uiWidth, uiHeight ) )
 		{
 			TERROR( "TTL_Load_Barnyard_PS2: couldn't infer dimensions for '%s' from %u bytes\n", pTex->szFileName, uiPixelDataSize );
 			continue;
@@ -466,7 +466,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 		// Result image data
 		TBYTE* pImgData = TNULL;
 
-		switch ( uiFormat )
+		switch ( eFormat )
 		{
 			case TTEX_FMT_PS2_PSMCT32:
 			{
@@ -623,7 +623,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		TASSERT( pImgData != TNULL );
 		rOutVector.EmplaceBack(
-		    Resource::StreamedTexture_Create( TPS8D( pTex->szFileName ), TINT( uiWidth ), TINT( uiHeight ), pImgData, bCreateTextures )
+		    Resource::StreamedTexture_Create( TPS8D( pTex->szFileName ), eFormat, TINT( uiWidth ), TINT( uiHeight ), pImgData, bCreateTextures )
 		);
 	}
 
