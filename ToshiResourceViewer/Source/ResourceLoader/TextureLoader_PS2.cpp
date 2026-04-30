@@ -140,6 +140,7 @@ static TBOOL InferPS2TextureDimensions( TUINT eFormat, TUINT uiPixelDataSize, TU
 	switch ( eFormat )
 	{
 		case TTEX_FMT_PS2_PSMCT32:
+		case TTEX_FMT_PS2_PSMCT24:
 		case TTEX_FMT_PS2_PSMT8_PSMCT32:
 		case TTEX_FMT_PS2_PSMT8_RGB888:
 		case TTEX_FMT_PS2_PSMT4_PSMCT32:
@@ -410,7 +411,7 @@ static TBOOL UploadPS2ClutToMode0Layout( const TUINT8* pClutData, TUINT uiLayout
 	return TTRUE;
 }
 
-static TUINT8 s_CLUTScratchBuffer[ 0x8000 ];
+static TUINT8 s_CLUTScratchBuffer[ 0x16000 ];
 
 TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, TBOOL bCreateTextures, Textures& rOutVector, TString8* pOutName /*= TNULL */ )
 {
@@ -434,6 +435,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 		const TUINT           uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
 
 		if ( eFormat != TTEX_FMT_PS2_PSMCT32 &&
+		     eFormat != TTEX_FMT_PS2_PSMCT24 &&
 		     eFormat != TTEX_FMT_PS2_PSMT8_PSMCT32 &&
 		     eFormat != TTEX_FMT_PS2_PSMT8_RGB888 &&
 		     eFormat != TTEX_FMT_PS2_PSMT4_PSMCT32 &&
@@ -475,6 +477,18 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
 				{
 					WriteRGBA8888( pImgData, px, pRawPixels + px * 4 );
+				}
+
+				break;
+			}
+
+			case TTEX_FMT_PS2_PSMCT24:
+			{
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGB888( pImgData, px, pRawPixels + px * 3 );
 				}
 
 				break;
