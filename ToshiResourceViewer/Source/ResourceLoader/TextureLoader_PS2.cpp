@@ -14,6 +14,41 @@ static TFORCEINLINE TUINT8 Expand5To8( TUINT16 value )
 	return TUINT8( ( value << 3 ) | ( value >> 2 ) );
 }
 
+static TFORCEINLINE TUINT8 ExpandPS2AlphaTo8( TUINT8 value )
+{
+	return value >= 128 ? 255 : TUINT8( value << 1 );
+}
+
+static TFORCEINLINE TUINT8 ReadPSMT4Index( const TUINT8* pPixels, TUINT uiPixelIndex )
+{
+	const TUINT8 uiPair = pPixels[ uiPixelIndex >> 1 ];
+	return ( uiPixelIndex & 1 ) == 0 ? ( uiPair & 0x0F ) : ( uiPair >> 4 );
+}
+
+static TFORCEINLINE void WriteRGBA8888( TBYTE* pImgData, TUINT uiPixelIndex, const TUINT8* pColor )
+{
+	pImgData[ uiPixelIndex * 4 + 0 ] = pColor[ 0 ];
+	pImgData[ uiPixelIndex * 4 + 1 ] = pColor[ 1 ];
+	pImgData[ uiPixelIndex * 4 + 2 ] = pColor[ 2 ];
+	pImgData[ uiPixelIndex * 4 + 3 ] = ExpandPS2AlphaTo8( pColor[ 3 ] );
+}
+
+static TFORCEINLINE void WriteRGB888( TBYTE* pImgData, TUINT uiPixelIndex, const TUINT8* pColor )
+{
+	pImgData[ uiPixelIndex * 4 + 0 ] = pColor[ 0 ];
+	pImgData[ uiPixelIndex * 4 + 1 ] = pColor[ 1 ];
+	pImgData[ uiPixelIndex * 4 + 2 ] = pColor[ 2 ];
+	pImgData[ uiPixelIndex * 4 + 3 ] = 255;
+}
+
+static TFORCEINLINE void WriteRGBA1555( TBYTE* pImgData, TUINT uiPixelIndex, TUINT16 uiClutEntry )
+{
+	pImgData[ uiPixelIndex * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
+	pImgData[ uiPixelIndex * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
+	pImgData[ uiPixelIndex * 4 + 2 ] = Expand5To8( ( uiClutEntry >> 10 ) & 0x1F );
+	pImgData[ uiPixelIndex * 4 + 3 ] = ( uiClutEntry & 0x8000 ) != 0 ? 255 : 0;
+}
+
 static TUINT DecodePS2ClutIndexForLayout( TUINT8 uiIndex, TUINT uiClutWidth )
 {
 	switch (uiClutWidth)
@@ -51,18 +86,24 @@ static TUINT DecodePS2ClutIndexForLayout( TUINT8 uiIndex, TUINT uiClutWidth )
 
 static TBOOL InferPS2TextureDimensions( TUINT uiFormat, TUINT uiPixelDataSize, TUINT uiGSWidth, TUINT uiGSHeight, TUINT& uiOutWidth, TUINT& uiOutHeight )
 {
-	if ( uiFormat == TTEX_FMT_PS2_PSMT8_RGB888 )
+	switch (uiFormat)
 	{
-		uiOutWidth  = uiGSWidth;
-		uiOutHeight = uiGSHeight;
-	}
-	else
-	{
-		uiOutWidth  = uiGSWidth >> 1;
-		uiOutHeight = uiGSHeight >> 1;
+		case TTEX_FMT_PS2_PSMCT32:
+		case TTEX_FMT_PS2_PSMT8_PSMCT32:
+		case TTEX_FMT_PS2_PSMT8_RGB888:
+		case TTEX_FMT_PS2_PSMT4_PSMCT32:
+		case TTEX_FMT_PS2_PSMT4_PSMCT16:
+			uiOutWidth  = uiGSWidth;
+			uiOutHeight = uiGSHeight;
+			return TTRUE;
+
+		case TTEX_FMT_PS2_PSMT8_PSMCT16:
+			uiOutWidth  = uiGSWidth >> 1;
+			uiOutHeight = uiGSHeight >> 1;
+			return TTRUE;
 	}
 
-	return TTRUE;
+	return TFALSE;
 }
 
 static void ReorderClut16Block( TUINT16* pDstWords, TUINT uiRowWords, const TUINT16* pSrcWords, TUINT uiSourceStrideWords, TUINT uiTotalBytes )
@@ -102,7 +143,7 @@ static void ReorderClut16Block( TUINT16* pDstWords, TUINT uiRowWords, const TUIN
 
 static TBOOL UploadPS2ClutToMode2Layout( const TUINT8* pClutData, TUINT uiLayoutWidth, TUINT16* pOutClut )
 {
-	if ( pClutData == TNULL || pOutClut == TNULL )
+	if ( pClutData == TNULL )
 		return TFALSE;
 
 	const TUINT16* pClutWords = TREINTERPRETCAST( const TUINT16*, pClutData );
@@ -159,7 +200,12 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 		const TUINT uiClutWidth     = CONVERTENDIANESS( eEndianess, pTex->uiCLUTWidth );
 		const TUINT uiClutHeight    = CONVERTENDIANESS( eEndianess, pTex->uiCLUTHeight );
 
-		if ( uiFormat != TTEX_FMT_PS2_PSMT8_RGB888 && uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT16 )
+		if ( uiFormat != TTEX_FMT_PS2_PSMCT32 &&
+		     uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT32 &&
+		     uiFormat != TTEX_FMT_PS2_PSMT8_RGB888 &&
+		     uiFormat != TTEX_FMT_PS2_PSMT4_PSMCT32 &&
+		     uiFormat != TTEX_FMT_PS2_PSMT4_PSMCT16 &&
+		     uiFormat != TTEX_FMT_PS2_PSMT8_PSMCT16 )
 		{
 			TERROR( "TTL_Load_Barnyard_PS2: unsupported texture format 0x%X in '%s'\n", uiFormat, pTex->szFileName );
 			continue;
@@ -189,17 +235,62 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		switch (uiFormat)
 		{
+			case TTEX_FMT_PS2_PSMCT32:
+			{
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGBA8888( pImgData, px, pRawPixels + px * 4 );
+				}
+
+				break;
+			}
+
+			case TTEX_FMT_PS2_PSMT8_PSMCT32:
+			{
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGBA8888( pImgData, px, pRawClut + pRawPixels[ px ] * 4 );
+				}
+
+				break;
+			}
+
 			case TTEX_FMT_PS2_PSMT8_RGB888:
 			{
 				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
 
 				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
 				{
-					const TUINT8* pColor   = pRawClut + pRawPixels[ px ] * 3;
-					pImgData[ px * 4 + 0 ] = pColor[ 0 ];
-					pImgData[ px * 4 + 1 ] = pColor[ 1 ];
-					pImgData[ px * 4 + 2 ] = pColor[ 2 ];
-					pImgData[ px * 4 + 3 ] = 255;
+					WriteRGB888( pImgData, px, pRawClut + pRawPixels[ px ] * 3 );
+				}
+
+				break;
+			}
+
+			case TTEX_FMT_PS2_PSMT4_PSMCT32:
+			{
+				pImgData = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGBA8888( pImgData, px, pRawClut + ReadPSMT4Index( pRawPixels, px ) * 4 );
+				}
+
+				break;
+			}
+
+			case TTEX_FMT_PS2_PSMT4_PSMCT16:
+			{
+				const TUINT16* pClutWords = TREINTERPRETCAST( const TUINT16*, pRawClut );
+				pImgData                 = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGBA1555( pImgData, px, pClutWords[ ReadPSMT4Index( pRawPixels, px ) ] );
 				}
 
 				break;
@@ -223,11 +314,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 				{
 					const TUINT uiClutIndex = DecodePS2ClutIndexForLayout( pRawPixels[ px ], uiClutWidth );
 					TUINT16     uiClutEntry = uiClutIndex < uiClutEntries ? pReorderedClut[ uiClutIndex ] : 0xFC1F;
-
-					pImgData[ px * 4 + 0 ] = Expand5To8( ( uiClutEntry >> 0 ) & 0x1F );
-					pImgData[ px * 4 + 1 ] = Expand5To8( ( uiClutEntry >> 5 ) & 0x1F );
-					pImgData[ px * 4 + 2 ] = Expand5To8( ( uiClutEntry >> 10 ) & 0x1F );
-					pImgData[ px * 4 + 3 ] = ( uiClutEntry & 0x8000 ) != 0 ? 255 : 0;
+					WriteRGBA1555( pImgData, px, uiClutEntry );
 				}
 
 				TFree( pReorderedClut );
