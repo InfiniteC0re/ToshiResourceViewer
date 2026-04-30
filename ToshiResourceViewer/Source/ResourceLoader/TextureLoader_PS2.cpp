@@ -141,6 +141,7 @@ static TBOOL InferPS2TextureDimensions( TUINT eFormat, TUINT uiPixelDataSize, TU
 	{
 		case TTEX_FMT_PS2_PSMCT32:
 		case TTEX_FMT_PS2_PSMCT24:
+		case TTEX_FMT_PS2_PSMCT16:
 		case TTEX_FMT_PS2_PSMT8_PSMCT32:
 		case TTEX_FMT_PS2_PSMT8_RGB888:
 		case TTEX_FMT_PS2_PSMT4_PSMCT32:
@@ -436,6 +437,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 
 		if ( eFormat != TTEX_FMT_PS2_PSMCT32 &&
 		     eFormat != TTEX_FMT_PS2_PSMCT24 &&
+		     eFormat != TTEX_FMT_PS2_PSMCT16 &&
 		     eFormat != TTEX_FMT_PS2_PSMT8_PSMCT32 &&
 		     eFormat != TTEX_FMT_PS2_PSMT8_RGB888 &&
 		     eFormat != TTEX_FMT_PS2_PSMT4_PSMCT32 &&
@@ -489,6 +491,19 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_PS2( void* pData, Endianess eEndianess, 
 				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
 				{
 					WriteRGB888( pImgData, px, pRawPixels + px * 3 );
+				}
+
+				break;
+			}
+
+			case TTEX_FMT_PS2_PSMCT16:
+			{
+				const TUINT16* pRawPixels16 = TREINTERPRETCAST( const TUINT16*, pRawPixels );
+				pImgData                    = TSTATICCAST( TBYTE, TMalloc( uiWidth * uiHeight * 4 ) );
+
+				for ( TUINT px = 0; px < uiWidth * uiHeight; px++ )
+				{
+					WriteRGBA1555( pImgData, px, pRawPixels16[ px ] );
 				}
 
 				break;
