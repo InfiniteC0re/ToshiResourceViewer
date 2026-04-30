@@ -197,7 +197,23 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 		CTLib::Buffer paletteBuffer;
 		if ( eCTLibPalFmt != CTLib::ImageFormat::NONE )
 		{
-			if ( eCTLibImgFmt == CTLib::ImageFormat::C4 )
+			if ( eCTLibImgFmt == CTLib::ImageFormat::C8 && eCTLibPalFmt == CTLib::ImageFormat::IA8 )
+			{
+				eCTLibPalFmt = CTLib::ImageFormat::RGBA8;
+				paletteBuffer.create( 256 * 4 );
+
+				for ( TUINT uiIndex = 0; uiIndex < 256; uiIndex++ )
+				{
+					const TUINT uiSrcPos = uiIndex * 2;
+					paletteBuffer.put( pTexInfo->pLUTColor[ uiSrcPos + 1 ] );
+					paletteBuffer.put( pTexInfo->pLUTColor[ uiSrcPos + 0 ] );
+					paletteBuffer.put( pTexInfo->pLUTAlpha[ uiSrcPos + 1 ] );
+					paletteBuffer.put( pTexInfo->pLUTAlpha[ uiSrcPos + 0 ] );
+				}
+
+				paletteBuffer.rewind();
+			}
+			else if ( eCTLibImgFmt == CTLib::ImageFormat::C4 )
 			{
 				paletteBuffer.create( 16 * 2 );
 				paletteBuffer.putArray( pLUT ? pLUT : pTexInfo->pLUTColor, 16 * 2 );
@@ -224,7 +240,7 @@ TBOOL ResourceLoader::TTL_Load_Barnyard_Rev( void* pData, Endianess eEndianess, 
 			TUtil::MemCopy( pData, *image.getData(), image.getData().capacity() );
 
 			rOutVector.EmplaceBack(
-			    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), pTTL->pTextureInfos[ i ].eFormat, TINT( uiWidth ), TINT( uiHeight ), pData, bCreateTextures )
+			    Resource::StreamedTexture_Create( TPS8D( pTTL->pTextureInfos[ i ].szFileName ), eFormat, TINT( uiWidth ), TINT( uiHeight ), pData, bCreateTextures )
 			);
 		}
 		catch ( CTLib::ImageError error )

@@ -378,6 +378,27 @@ Image decodeCI8_RGB5A3( Buffer& data, Buffer& palette, uint32_t width, uint32_t 
 	} );
 }
 
+Image decodeCI8_RGBA8( Buffer& data, Buffer& palette, uint32_t width, uint32_t height )
+{
+	return decodeBasePalette( data, palette, width, height, 8, 4, []( Buffer& data, Buffer& palette, Buffer& out, uint32_t width, uint32_t height, uint32_t x, uint32_t y ) {
+		uint8_t coloridx = data.get();
+
+		palette.position( coloridx << 2 );
+		uint8_t red   = palette.get();
+		uint8_t green = palette.get();
+		uint8_t blue  = palette.get();
+		uint8_t alpha = palette.get();
+		if ( x < width && y < height )
+		{
+			size_t off = ( ( y * width ) + x ) * 4;
+			out.put( off + 0, red );
+			out.put( off + 1, green );
+			out.put( off + 2, blue );
+			out.put( off + 3, alpha );
+		}
+	} );
+}
+
 Image decodeRGBA8( Buffer& data, uint32_t width, uint32_t height )
 {
 	return decodeBlock( data, width, height, 4, 4, 2, []( Buffer& block, Buffer& out, uint32_t width, uint32_t height, uint32_t gx, uint32_t gy ) {
@@ -522,6 +543,8 @@ Image ImageCoder::decode( Buffer& data, Buffer& palette, uint32_t width, uint32_
 					return decodeCI8_RGB5A3( data, palette, width, height );
 				else if ( paletteFormat == ImageFormat::RGB565 )
 					return decodeCI8_RGB565( data, palette, width, height );
+				else if ( paletteFormat == ImageFormat::RGBA8 )
+					return decodeCI8_RGBA8( data, palette, width, height );
 				else
 					throw ImageError( "Unsupported palette format!" );
 
