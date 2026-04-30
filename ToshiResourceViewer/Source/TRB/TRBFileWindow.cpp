@@ -3,6 +3,7 @@
 #include "TRBSymbolManager.h"
 #include "Application.h"
 #include "imgui.h"
+#include "ResourceLoader/TextureLoader.h"
 
 #include <Render/TTMDBase.h>
 
@@ -46,10 +47,22 @@ static TOSHISKU DetermineFileSKU( PTRB* pFile )
 		// Check models format
 		if ( auto pFileHeader = pFile->GetSymbols()->Find<TTMDBase::FileHeader>( pFile->GetSections(), "FileHeader" ) )
 		{
-			if ( pFile->ConvertEndianess( pFileHeader->m_uiMagic ) == TFourCC( "TMDL" ) )
+			if ( pFileHeader->m_uiMagic == TFourCC( "TMDL" ) )
 			{
 				auto pRawHdr = pFile->GetSymbols()->Find<TUINT32>( pFile->GetSections(), "Header" );
 				if ( pRawHdr && *( pRawHdr.get() + 2 ) > 0x10000u )
+					eSKU = TOSHISKU_PS2;
+			}
+		}
+
+		// Check textures format
+		if ( auto pTTL = pFile->GetSymbols()->Find<ResourceLoader::TTL_Win>( pFile->GetSections(), "TTL" ) )
+		{
+			if ( pTTL->iNumTextures > 0 )
+			{
+				TTEXTURE_FORMAT eTexFmt = pTTL->pTextureInfos[ 0 ].eFormat;
+
+				if ( eTexFmt > TOSHI_NAMESPACE::TTEX_FMT_PS2_BASE && eTexFmt < TTEX_FMT_PS2_END )
 					eSKU = TOSHISKU_PS2;
 			}
 		}
@@ -194,12 +207,13 @@ void TRBFileWindow::Render( TFLOAT fDeltaTime )
 	ImGuiComponent::PreRender();
 	ImGuiID uiDockSpaceID = ImGui::GetID( m_strWindowName.GetString() );
 
-	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 8.0f ) );
 	ImGui::SetNextWindowSize( ImVec2( 800, 600 ), ImGuiCond_Appearing );
 	ImGui::Begin( m_strWindowName, &m_bVisible, ImGuiWindowFlags_NoSavedSettings );
-
 	ImGui::DockSpace( uiDockSpaceID, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode );
+	ImGui::PopStyleVar();
 
+	ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 8.0f ) );
 	{
 		// Render general tab containing basic info about TRB file
 		ImGui::SetNextWindowDockID( uiDockSpaceID, ImGuiCond_Always );
@@ -250,8 +264,8 @@ void TRBFileWindow::Render( TFLOAT fDeltaTime )
 		pResourceView->PostRender();
 	}
 
-	ImGui::End();
 	ImGui::PopStyleVar();
+	ImGui::End();
 
 	ImGuiComponent::PostRender();
 }

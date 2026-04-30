@@ -106,21 +106,23 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	ImVec4*     colors = style.Colors;
 
 	// Corners
-	style.WindowPadding     = ImVec2( 15.0f, 15.0f );
-	style.WindowRounding    = 10.0f;
-	style.ChildRounding     = 6.0f;
-	style.FramePadding      = ImVec2( 8.0f, 7.0f );
-	style.FrameRounding     = 8.0f;
+	style.WindowPadding     = ImVec2( 12.0f, 12.0f );
+	style.WindowRounding    = 0.0f;
+	style.ChildRounding     = 4.0f;
+	style.FramePadding      = ImVec2( 8.0f, 6.0f );
+	style.FrameRounding     = 4.0f;
 	style.ItemSpacing       = ImVec2( 8.0f, 8.0f );
 	style.ItemInnerSpacing  = ImVec2( 10.0f, 6.0f );
 	style.IndentSpacing     = 25.0f;
-	style.ScrollbarSize     = 13.0f;
+	style.ScrollbarSize     = 12.0f;
+	style.ScrollbarPadding  = 4.0f;
 	style.ScrollbarRounding = 12.0f;
 	style.GrabMinSize       = 10.0f;
-	style.GrabRounding      = 6.0f;
-	style.PopupRounding     = 8.0f;
+	style.GrabRounding      = 4.0f;
+	style.PopupRounding     = 4.0f;
 	style.WindowTitleAlign  = ImVec2( 0.5f, 0.5f );
 	style.ButtonTextAlign   = ImVec2( 0.5f, 0.5f );
+	style.TabRounding       = 0.0f;
 
 	style.Colors[ ImGuiCol_Text ]                 = ImVec4( 0.90f, 0.90f, 0.93f, 1.00f );
 	style.Colors[ ImGuiCol_TextDisabled ]         = ImVec4( 0.40f, 0.40f, 0.45f, 1.00f );
