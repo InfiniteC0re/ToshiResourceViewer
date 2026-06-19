@@ -1,22 +1,17 @@
 #version 460
-layout (location = 0) out vec4 gPosition;
-layout (location = 1) out vec4 gNormal;
-layout (location = 2) out vec4 gColor;
-layout (location = 3) out vec4 gInfo;
+layout(location = 0) out vec4 gColor;
 
-in vec2 textureCoord;
-in vec3 vertexColor;
-in vec3 fragPos;
-in vec3 normal;
+in vec2 o_TexCoord;
+in vec4 o_VertexColor;
+in vec3 o_FragPos;
+in vec3 o_Normal;
 
 uniform sampler2D tex0;
+uniform float u_AlphaRef;
 
 void main() {
-    vec4 texColor = texture(tex0, textureCoord);
-    if (texColor.a <= 0.5) discard;
+    vec4 texColor = texture(tex0, o_TexCoord);
+    if (texColor.a * o_VertexColor.a < u_AlphaRef / 255.0) discard;
 
-    gPosition = vec4(fragPos, 1.0f);
-    gNormal = vec4(normal, 1.0f);
-    gColor = texColor;
-    gInfo.rgba = vec4(0.0f);
+    gColor = texColor * o_VertexColor;
 }

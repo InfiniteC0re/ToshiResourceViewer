@@ -235,52 +235,68 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 		};
 
 		const TBOOL bDecompileAll = g_pCmd->HasParameter( "-all" );
+		const TBOOL bRecursive    = g_pCmd->HasParameter( "-recursive" );
 
 		if ( bDecompileAll )
 		{
 			T2Map<TPString8, T2DynamicVector<TString8>, TPString8::Comparator> mapTKLToModels;
 			TFileSystem*                                                       pFileSystem = TFileManager::GetSingleton()->FindFileSystem( "local" );
 
-			TString8 strCurrentFile;
-			TBOOL    bHasFile = pFileSystem->GetFirstFile( strInputFilePath, strCurrentFile );
+			auto fnScanDir = [ & ]( auto&& self, const TString8& strDir ) -> void {
+				T2DynamicVector<TString8> vecSubDirs;
 
-			fnMoveCursor();
-			while ( bHasFile )
-			{
-				if ( strCurrentFile.EndsWithNoCase( ".trb" ) || strCurrentFile.EndsWithNoCase( ".trz" ) || strCurrentFile.EndsWithNoCase( ".ttl" ) )
+				TString8 strCurrentFile;
+				TBOOL    bHasFile = pFileSystem->GetFirstFile( strDir, strCurrentFile );
+
+				while ( bHasFile )
 				{
-					TString8 strFullPath = TString8::VarArgs( "%s\\%s", strInputFilePath.GetString(), strCurrentFile.GetString() );
-
-					PTRB oInTRB;
-					if ( oInTRB.ReadFromFile( strFullPath.GetString() ) )
+					if ( strCurrentFile.EndsWithNoCase( ".trb" ) || strCurrentFile.EndsWithNoCase( ".trz" ) || strCurrentFile.EndsWithNoCase( ".ttl" ) )
 					{
-						ResourceType eResType = fnGetResourceType( oInTRB );
+						TString8 strFullPath = TString8::VarArgs( "%s\\%s", strDir.GetString(), strCurrentFile.GetString() );
 
-						// Special case when handling model resource type!
-						if ( eResType == ResourceType::Model )
+						PTRB oInTRB;
+						if ( oInTRB.ReadFromFile( strFullPath.GetString() ) )
 						{
-							TPString8 strTKLName = fnExportModel( oInTRB, strFullPath );
+							ResourceType eResType = fnGetResourceType( oInTRB );
 
-							if ( !strTKLName.IsEmpty() )
+							// Special case when handling model resource type!
+							if ( eResType == ResourceType::Model )
 							{
-								// Add TKL to the list
-								auto                       itModelList = mapTKLToModels.Find( strTKLName );
-								T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
+								TPString8 strTKLName = fnExportModel( oInTRB, strFullPath );
 
-								TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
-								pModelList->PushBack( strModelName );
+								if ( !strTKLName.IsEmpty() )
+								{
+									// Add TKL to the list
+									auto                       itModelList = mapTKLToModels.Find( strTKLName );
+									T2DynamicVector<TString8>* pModelList  = ( itModelList == mapTKLToModels.End() ) ? mapTKLToModels.Insert( strTKLName, {} ) : &itModelList->second;
+
+									TString8 strModelName = strCurrentFile.Mid( 0, strCurrentFile.FindReverse( '.' ) );
+									pModelList->PushBack( strModelName );
+								}
+							}
+							else if ( eResType != ResourceType::Unknown )
+							{
+								// Handle any other case
+								fnExportResource( oInTRB, strFullPath );
 							}
 						}
-						else if ( eResType != ResourceType::Unknown )
-						{
-							// Handle any other case
-							fnExportResource( oInTRB, strFullPath );
-						}
 					}
+					else if ( bRecursive && strCurrentFile.Compare( "." ) != 0 && strCurrentFile.Compare( ".." ) != 0 )
+					{
+						vecSubDirs.PushBack( TString8::VarArgs( "%s\\%s", strDir.GetString(), strCurrentFile.GetString() ) );
+					}
+
+					bHasFile = pFileSystem->GetNextFile( strCurrentFile );
 				}
 
-				bHasFile = pFileSystem->GetNextFile( strCurrentFile );
-			}
+				T2_FOREACH( vecSubDirs, itSubDir )
+				{
+					self( self, *itSubDir );
+				}
+			};
+
+			fnMoveCursor();
+			fnScanDir( fnScanDir, strInputFilePath );
 
 			// Save model lists
 			T2_FOREACH( mapTKLToModels, it )
