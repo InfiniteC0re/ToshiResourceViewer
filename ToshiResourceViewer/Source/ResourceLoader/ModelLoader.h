@@ -70,6 +70,20 @@ public:
 
 	void Render();
 
+	struct CollisionGroupInfo
+	{
+		Toshi::TString8 strName;
+		TUINT          uiNumFaces = 0;
+	};
+
+	struct CollisionMeshInfo
+	{
+		TINT                                       iBoneID       = -1;
+		TUINT                                      uiNumVertices = 0;
+		TUINT                                      uiNumIndices  = 0;
+		Toshi::T2DynamicVector<CollisionGroupInfo> vecGroups;
+	};
+
 public:
 	PTRB* pTRB;
 	
@@ -82,8 +96,8 @@ public:
 	Toshi::TModelLOD aLODs[ 5 ];
 	TFLOAT           aLODDistances[ 5 ];
 
-	TINT                        iNumCollisionMeshes;
-	Toshi::TModelCollisionData* pCollisionMeshes;
+	TINT               iNumCollisionMeshes;
+	CollisionMeshInfo* pCollisionMeshes;
 
 	ResourceLoader::Textures vecUsedTextures;
 

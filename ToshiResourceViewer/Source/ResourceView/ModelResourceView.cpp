@@ -736,7 +736,9 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 	tinygltf::Scene  gltfScene;
 
 	tinygltf::Node gltfRootNode;
-	gltfRootNode.name = m_strFileName.GetString();
+	gltfRootNode.name = "Model";
+	TINT iCollisionRootNode = -1;
+	TINT iSkeletonRootNode  = -1;
 	
 	//TQuaternion quatRotation;
 	//quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
@@ -801,9 +803,15 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 
 			// Set parenting
 			if ( iParentBone == -1 )
+			{
 				gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
+				if ( iSkeletonRootNode == -1 )
+					iSkeletonRootNode = iBoneIndex;
+			}
 			else
+			{
 				gltfModel.nodes[ iBaseBoneIndex + iParentBone ].children.push_back( iBoneIndex );
+			}
 		}
 
 		// Add the IBM buffer
@@ -1015,8 +1023,6 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 	// 2. Serialize the meshes
 	//-----------------------------------------------------------------------------
 
-	const TBOOL bHasFewLODs = pModel->iLODCount != 1;
-
 	for ( TINT k = 0; k < pModel->iLODCount; k++ )
 	{
 		// For each LOD...
@@ -1034,37 +1040,231 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 		
 		TSIZE uiEndMesh = gltfModel.nodes.size();
 
-		if ( bHasFewLODs )
+		for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
 		{
-			// Setup LOD node
-			tinygltf::Node gltfLODNode;
-			for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
-				gltfLODNode.children.push_back( i );
-
-			gltfLODNode.name = TString8::VarArgs( "LOD%d", k ).GetString();
-
-			// Add LOD node
-			gltfModel.nodes.push_back( std::move( gltfLODNode ) );
-			gltfRootNode.children.push_back( gltfModel.nodes.size() - 1 );
-		}
-		else
-		{
-			// Add straight to the root
-			for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
-			{
-				gltfRootNode.children.push_back( i );
-			}
+			gltfRootNode.children.push_back( TINT( i ) );
 		}
 		
 	}
 
+	//-----------------------------------------------------------------------------
+	// 3. Collision
+	//-----------------------------------------------------------------------------
+
+	if ( !m_bIsExternal && m_pTRB )
+	{
+		auto pCollisionHeader = m_pTRB->GetSymbols()->Find<TTMDBase::CollisionHeader>( m_pTRB->GetSections(), "Collision" );
+
+		if ( pCollisionHeader )
+		{
+			const TINT iNumCollisionMeshes = m_pTRB->ConvertEndianess( pCollisionHeader->m_iNumMeshes );
+			T2DynamicVector<TINT> vecCollisionNodes;
+
+			auto fnGetCollisionMaterial = [ &gltfModel ]( const TCHAR* pchGroupName ) -> TINT {
+				TString8 strMaterialName = TString8::VarArgs( "Collision_%s", pchGroupName ? pchGroupName : "Default" );
+				TINT     iMaterialIndex  = gltfModel.FindMaterialIndex( strMaterialName.GetString() );
+
+				if ( iMaterialIndex == -1 )
+				{
+					tinygltf::Material gltfMaterial;
+					gltfMaterial.name = strMaterialName.GetString();
+					gltfMaterial.pbrMetallicRoughness.baseColorFactor = { 0.0, 0.75, 1.0, 0.35 };
+					gltfMaterial.alphaMode = "BLEND";
+					gltfMaterial.doubleSided = true;
+
+					gltfModel.materials.push_back( std::move( gltfMaterial ) );
+					iMaterialIndex = TINT( gltfModel.materials.size() - 1 );
+				}
+
+				return iMaterialIndex;
+			};
+
+			for ( TINT i = 0; i < iNumCollisionMeshes; i++ )
+			{
+				auto& rCollisionMesh = pCollisionHeader->m_pMeshes[ i ];
+
+				const TUINT uiNumVertices = m_pTRB->ConvertEndianess( rCollisionMesh.m_uiNumVertices );
+				const TUINT uiNumIndices  = m_pTRB->ConvertEndianess( rCollisionMesh.m_uiNumIndices );
+				if ( uiNumVertices == 0 || uiNumIndices == 0 ) continue;
+
+				tinygltf::Buffer gltfBuffer;
+				const TINT       iBufferIndex = TINT( gltfModel.buffers.size() );
+
+				std::vector<double> aMinVals = {
+					std::numeric_limits<double>::max(),
+					std::numeric_limits<double>::max(),
+					std::numeric_limits<double>::max()
+				};
+				std::vector<double> aMaxVals = {
+					std::numeric_limits<double>::lowest(),
+					std::numeric_limits<double>::lowest(),
+					std::numeric_limits<double>::lowest()
+				};
+
+				for ( TUINT k = 0; k < uiNumVertices; k++ )
+				{
+					TVector3 vecPosition(
+					    m_pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].x ),
+					    m_pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].y ),
+					    m_pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].z )
+					);
+
+					aMinVals[ 0 ] = TMath::Min( aMinVals[ 0 ], TDOUBLE( vecPosition.x ) );
+					aMinVals[ 1 ] = TMath::Min( aMinVals[ 1 ], TDOUBLE( vecPosition.y ) );
+					aMinVals[ 2 ] = TMath::Min( aMinVals[ 2 ], TDOUBLE( vecPosition.z ) );
+					aMaxVals[ 0 ] = TMath::Max( aMaxVals[ 0 ], TDOUBLE( vecPosition.x ) );
+					aMaxVals[ 1 ] = TMath::Max( aMaxVals[ 1 ], TDOUBLE( vecPosition.y ) );
+					aMaxVals[ 2 ] = TMath::Max( aMaxVals[ 2 ], TDOUBLE( vecPosition.z ) );
+
+					gltfBuffer.data.insert( gltfBuffer.data.end(), TREINTERPRETCAST( const TBYTE*, &vecPosition ), TREINTERPRETCAST( const TBYTE*, &vecPosition + 1 ) );
+				}
+
+				const TSIZE uiIndexBufferOffset = gltfBuffer.data.size();
+				for ( TUINT k = 0; k < uiNumIndices; k++ )
+				{
+					TUINT16 uiIndex = m_pTRB->ConvertEndianess( rCollisionMesh.m_pIndices[ k ] );
+					gltfBuffer.data.insert( gltfBuffer.data.end(), TREINTERPRETCAST( const TBYTE*, &uiIndex ), TREINTERPRETCAST( const TBYTE*, &uiIndex + 1 ) );
+				}
+
+				tinygltf::BufferView gltfBufferViewVertex;
+				gltfBufferViewVertex.buffer     = iBufferIndex;
+				gltfBufferViewVertex.byteOffset = 0;
+				gltfBufferViewVertex.byteLength = uiNumVertices * sizeof( TVector3 );
+				gltfBufferViewVertex.byteStride = sizeof( TVector3 );
+				gltfBufferViewVertex.target     = TINYGLTF_TARGET_ARRAY_BUFFER;
+				gltfModel.bufferViews.push_back( std::move( gltfBufferViewVertex ) );
+				const TINT iVertexBufferView = TINT( gltfModel.bufferViews.size() - 1 );
+
+				tinygltf::Accessor gltfAccPosition;
+				gltfAccPosition.bufferView    = iVertexBufferView;
+				gltfAccPosition.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+				gltfAccPosition.type          = TINYGLTF_TYPE_VEC3;
+				gltfAccPosition.count         = uiNumVertices;
+				gltfAccPosition.minValues     = std::move( aMinVals );
+				gltfAccPosition.maxValues     = std::move( aMaxVals );
+				gltfModel.accessors.push_back( std::move( gltfAccPosition ) );
+				const TINT iAccPositionIndex = TINT( gltfModel.accessors.size() - 1 );
+
+				tinygltf::BufferView gltfBufferViewIndex;
+				gltfBufferViewIndex.buffer     = iBufferIndex;
+				gltfBufferViewIndex.byteOffset = uiIndexBufferOffset;
+				gltfBufferViewIndex.byteLength = uiNumIndices * sizeof( TUINT16 );
+				gltfBufferViewIndex.target     = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
+				gltfModel.bufferViews.push_back( std::move( gltfBufferViewIndex ) );
+				const TINT iIndexBufferView = TINT( gltfModel.bufferViews.size() - 1 );
+
+				const TUINT uiNumCollTypes = m_pTRB->ConvertEndianess( rCollisionMesh.m_uiNumCollTypes );
+				TUINT      uiFaceOffset    = 0;
+				TBOOL      bCreatedNode    = TFALSE;
+
+				auto fnCreateCollisionNode = [ &gltfModel, &vecCollisionNodes, &fnGetCollisionMaterial, iAccPositionIndex ]( const TCHAR* pchCollisionName, TINT iAccIndicesIndex ) {
+					const TCHAR* pchName = pchCollisionName ? pchCollisionName : "default";
+
+					tinygltf::Primitive gltfPrimitive;
+					gltfPrimitive.attributes[ "POSITION" ] = iAccPositionIndex;
+					gltfPrimitive.indices                  = iAccIndicesIndex;
+					gltfPrimitive.mode                     = TINYGLTF_MODE_TRIANGLES;
+					gltfPrimitive.material                 = fnGetCollisionMaterial( pchName );
+
+					tinygltf::Mesh gltfCollisionMesh;
+					gltfCollisionMesh.name = pchName;
+					gltfCollisionMesh.primitives.push_back( std::move( gltfPrimitive ) );
+
+					gltfModel.meshes.push_back( std::move( gltfCollisionMesh ) );
+
+					tinygltf::Node gltfCollisionNode;
+					gltfCollisionNode.mesh = TINT( gltfModel.meshes.size() - 1 );
+					gltfCollisionNode.name = pchName;
+					gltfModel.nodes.push_back( std::move( gltfCollisionNode ) );
+					vecCollisionNodes.PushBack( TINT( gltfModel.nodes.size() - 1 ) );
+				};
+
+				for ( TUINT k = 0; k < uiNumCollTypes; k++ )
+				{
+					auto&       rCollisionGroup = rCollisionMesh.m_pCollGroups[ k ];
+					const TUINT uiNumFaces      = m_pTRB->ConvertEndianess( rCollisionGroup.uiNumFaces );
+					if ( uiNumFaces == 0 ) continue;
+					if ( ( uiFaceOffset + uiNumFaces ) * 3 > uiNumIndices ) break;
+
+					tinygltf::Accessor gltfAccIndex;
+					gltfAccIndex.bufferView    = iIndexBufferView;
+					gltfAccIndex.byteOffset    = uiFaceOffset * 3 * sizeof( TUINT16 );
+					gltfAccIndex.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+					gltfAccIndex.type          = TINYGLTF_TYPE_SCALAR;
+					gltfAccIndex.count         = uiNumFaces * 3;
+					gltfModel.accessors.push_back( std::move( gltfAccIndex ) );
+					const TINT iAccIndicesIndex = TINT( gltfModel.accessors.size() - 1 );
+
+					fnCreateCollisionNode( rCollisionGroup.pszName, iAccIndicesIndex );
+					bCreatedNode = TTRUE;
+
+					uiFaceOffset += uiNumFaces;
+				}
+
+				if ( uiFaceOffset * 3 < uiNumIndices )
+				{
+					tinygltf::Accessor gltfAccIndex;
+					gltfAccIndex.bufferView    = iIndexBufferView;
+					gltfAccIndex.byteOffset    = uiFaceOffset * 3 * sizeof( TUINT16 );
+					gltfAccIndex.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+					gltfAccIndex.type          = TINYGLTF_TYPE_SCALAR;
+					gltfAccIndex.count         = uiNumIndices - ( uiFaceOffset * 3 );
+					gltfModel.accessors.push_back( std::move( gltfAccIndex ) );
+					const TINT iAccIndicesIndex = TINT( gltfModel.accessors.size() - 1 );
+
+					fnCreateCollisionNode( "default", iAccIndicesIndex );
+					bCreatedNode = TTRUE;
+				}
+
+				if ( !bCreatedNode )
+				{
+					tinygltf::Accessor gltfAccIndex;
+					gltfAccIndex.bufferView    = iIndexBufferView;
+					gltfAccIndex.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+					gltfAccIndex.type          = TINYGLTF_TYPE_SCALAR;
+					gltfAccIndex.count         = uiNumIndices;
+					gltfModel.accessors.push_back( std::move( gltfAccIndex ) );
+					const TINT iAccIndicesIndex = TINT( gltfModel.accessors.size() - 1 );
+
+					fnCreateCollisionNode( "default", iAccIndicesIndex );
+				}
+
+				gltfModel.buffers.push_back( std::move( gltfBuffer ) );
+			}
+
+			if ( !vecCollisionNodes.IsEmpty() )
+			{
+				tinygltf::Node gltfCollisionRootNode;
+				gltfCollisionRootNode.name = "Collision";
+
+				T2_FOREACH( vecCollisionNodes, itNode )
+				{
+					gltfCollisionRootNode.children.push_back( *itNode );
+				}
+
+				gltfModel.nodes.push_back( std::move( gltfCollisionRootNode ) );
+				iCollisionRootNode = TINT( gltfModel.nodes.size() - 1 );
+			}
+		}
+	}
+
 	// Finalize
 	gltfModel.nodes.push_back( std::move( gltfRootNode ) );
-	gltfScene.nodes.push_back( gltfModel.nodes.size() - 1 );
+	const TINT iModelRootNode = TINT( gltfModel.nodes.size() - 1 );
+
+	tinygltf::Node gltfFileRootNode;
+	gltfFileRootNode.name = m_strFileName.GetString();
+	gltfFileRootNode.children.push_back( iModelRootNode );
+
+	if ( iCollisionRootNode != -1 )
+		gltfFileRootNode.children.push_back( iCollisionRootNode );
+
+	gltfModel.nodes.push_back( std::move( gltfFileRootNode ) );
+	gltfScene.nodes.push_back( TINT( gltfModel.nodes.size() - 1 ) );
 	gltfModel.scenes.push_back( std::move( gltfScene ) );
 
 	if ( gltfModel.skins.size() > 0 )
-		gltfModel.skins[ 0 ].skeleton = gltfModel.nodes.size() - 1;
+		gltfModel.skins[ 0 ].skeleton = iSkeletonRootNode;
 
 	return TTRUE;
 }
@@ -1175,6 +1375,88 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 			pSeqElem->SetAttribute( "Looped", pSeq->GetMode() == TOSHI_NAMESPACE::TSkeletonSequence::MODE_LOOPED );
 			pSeqElem->SetAttribute( "Duration", pSeq->GetDuration() );
 			pSeqElem->SetAttribute( "Bones", pSeq->m_iNumUsedBones );
+		}
+	}
+
+	auto pCollisionElem = pTMDLElem->InsertNewChildElement( "Collision" );
+	pCollisionElem->SetAttribute( "MeshCount", m_ModelInstance.pModel->iNumCollisionMeshes );
+
+	for ( TINT i = 0; i < m_ModelInstance.pModel->iNumCollisionMeshes; i++ )
+	{
+		auto& rCollisionMesh = m_ModelInstance.pModel->pCollisionMeshes[ i ];
+
+		auto pMeshElem = pCollisionElem->InsertNewChildElement( "Mesh" );
+		pMeshElem->SetAttribute( "Index", i );
+		pMeshElem->SetAttribute( "Bone", rCollisionMesh.iBoneID );
+
+		if ( TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance )
+		{
+			TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
+			const TINT iBoneId = rCollisionMesh.iBoneID;
+
+			if ( iBoneId >= 0 && iBoneId < pSkeleton->GetBoneCount() )
+				pMeshElem->SetAttribute( "BoneName", pSkeleton->GetBone( iBoneId )->GetName() );
+		}
+
+		pMeshElem->SetAttribute( "Vertices", rCollisionMesh.uiNumVertices );
+		pMeshElem->SetAttribute( "Indices", rCollisionMesh.uiNumIndices );
+
+		for ( TINT k = 0; k < rCollisionMesh.vecGroups.Size(); k++ )
+		{
+			auto& rCollisionGroup = rCollisionMesh.vecGroups[ k ];
+
+			auto pGroupElem = pMeshElem->InsertNewChildElement( "Group" );
+			pGroupElem->SetAttribute( "Name", rCollisionGroup.strName.GetString() );
+			pGroupElem->SetAttribute( "Faces", rCollisionGroup.uiNumFaces );
+		}
+	}
+}
+
+void ModelResourceView::DeserializeModelInformation( tinyxml2::XMLDocument* pInput )
+{
+	auto pTMDLElem = pInput->FirstChildElement( "TMDL" );
+	if ( !pTMDLElem ) return;
+
+	m_ModelInstance.pModel->aLODDistances[ 0 ] = pTMDLElem->FloatAttribute( "LODDistance", 30.0f );
+
+	auto pSkeletonElem = pTMDLElem->FirstChildElement( "TSkeleton" );
+	if ( TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance )
+	{
+		TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
+
+		const TINT iNumBones = pSkeleton->m_iBoneCount;
+		const TINT iNumSeq   = pSkeleton->m_iSequenceCount;
+
+		// Deserialize info about the sequences
+		auto pSequencesElem = pSkeletonElem->FirstChildElement( "Sequences" );
+
+		for ( auto pSeqElem = pSequencesElem->FirstChildElement( "Sequence" ); pSeqElem != TNULL; pSeqElem = pSeqElem->NextSiblingElement( "Sequence" ) )
+		{
+			const TCHAR* pSeqElemName = TNULL;
+			pSeqElem->QueryStringAttribute( "Name", &pSeqElemName );
+			if ( !pSeqElemName ) continue;
+
+			const auto uiSeqNameLength = T2String8::Length( pSeqElemName );
+
+			TSkeletonSequence* pSeq = TNULL;
+			for ( TINT i = 0; i < iNumSeq; i++ )
+			{
+				auto pTestSeq = &pSkeleton->m_SkeletonSequences[ i ];
+
+				if ( pTestSeq->GetNameLength() == uiSeqNameLength && T2String8::CompareNoCase( pTestSeq->GetName(), pSeqElemName ) == 0 )
+				{
+					pSeq = pTestSeq;
+					break;
+				}
+			}
+
+			if ( !pSeq ) continue;
+
+			const TBOOL bOverlay = pSeqElem->BoolAttribute( "Overlay", TFALSE );
+			const TBOOL bLooped  = pSeqElem->BoolAttribute( "Looped", TTRUE );
+
+			pSeq->m_eFlags = bOverlay ? TSkeletonSequence::FLAG_OVERLAY : TSkeletonSequence::FLAG_NONE;
+			pSeq->m_eMode  = bLooped ? TSkeletonSequence::MODE_LOOPED : TSkeletonSequence::MODE_CLAMPED;
 		}
 	}
 }

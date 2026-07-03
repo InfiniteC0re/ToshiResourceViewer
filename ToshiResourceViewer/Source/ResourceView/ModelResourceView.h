@@ -32,6 +32,7 @@ public:
 	TBOOL            TryFixingMissingTKL();
 
 	void SerializeModelInformation( tinyxml2::XMLDocument* pOutput );
+	void DeserializeModelInformation( tinyxml2::XMLDocument* pInput );
 
 private:
 	Toshi::T2FormatString64       m_strDockspaceId;

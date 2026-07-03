@@ -24,6 +24,37 @@ static constexpr TUINT MAX_NUM_MODEL_MATERIALS = 150;
 static Toshi::TTMDBase::MaterialsHeader s_oCurrentModelMaterialsHeader;
 static Toshi::TTMDBase::Material        s_oCurrentModelMaterials[ MAX_NUM_MODEL_MATERIALS ];
 
+// NOTE: replicates Windows code path, haven't tested it
+static void ModelLoader_LoadCollision_Barnyard_PS2( PTRB* pTRB, ResourceLoader::Model* pModel )
+{
+	auto pCollisionHeader = pTRB->GetSymbols()->Find<TTMDBase::CollisionHeader>( pTRB->GetSections(), "Collision" );
+	if ( !pCollisionHeader ) return;
+
+	pModel->iNumCollisionMeshes = pCollisionHeader->m_iNumMeshes;
+	if ( pModel->iNumCollisionMeshes <= 0 ) return;
+
+	pModel->pCollisionMeshes = new ResourceLoader::Model::CollisionMeshInfo[ pModel->iNumCollisionMeshes ];
+
+	for ( TINT i = 0; i < pModel->iNumCollisionMeshes; i++ )
+	{
+		auto& rCollisionMesh = pCollisionHeader->m_pMeshes[ i ];
+
+		auto& rOutCollisionMesh = pModel->pCollisionMeshes[ i ];
+		rOutCollisionMesh.iBoneID       = rCollisionMesh.m_iBoneID;
+		rOutCollisionMesh.uiNumVertices = rCollisionMesh.m_uiNumVertices;
+		rOutCollisionMesh.uiNumIndices  = rCollisionMesh.m_uiNumIndices;
+
+		for ( TUINT k = 0; k < rCollisionMesh.m_uiNumCollTypes; k++ )
+		{
+			auto& rCollisionGroup = rCollisionMesh.m_pCollGroups[ k ];
+
+			auto& rOutCollisionGroup = rOutCollisionMesh.vecGroups.PushBack();
+			rOutCollisionGroup.strName    = rCollisionGroup.pszName ? rCollisionGroup.pszName : "default";
+			rOutCollisionGroup.uiNumFaces = rCollisionGroup.uiNumFaces;
+		}
+	}
+}
+
 static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 {
 	for ( TINT i = 0; i < s_oCurrentModelMaterialsHeader.iNumMaterials; i++ )
@@ -316,6 +347,8 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_PS
 				break;
 		}
 	}
+
+	//ModelLoader_LoadCollision_Barnyard_PS2( pTRB, pModel.Get() );
 
 	pModel->eModelType = eFiguredOutModelType;
 

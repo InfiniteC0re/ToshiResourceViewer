@@ -843,6 +843,9 @@ ResourceLoader::Model::~Model()
 		pSkeleton->m_KeyLibraryInstance.Destroy();
 		delete pSkeleton;
 	}
+
+	delete[] pCollisionMeshes;
+	pCollisionMeshes = TNULL;
 }
 
 void ResourceLoader::Model::Render()

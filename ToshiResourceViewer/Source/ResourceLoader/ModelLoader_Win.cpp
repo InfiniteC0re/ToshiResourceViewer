@@ -24,6 +24,41 @@ static constexpr TUINT MAX_NUM_MODEL_MATERIALS = 150;
 static Toshi::TTMDBase::MaterialsHeader s_oCurrentModelMaterialsHeader;
 static Toshi::TTMDBase::Material        s_oCurrentModelMaterials[ MAX_NUM_MODEL_MATERIALS ];
 
+static void ModelLoader_LoadCollision_Barnyard( PTRB* pTRB, ResourceLoader::Model* pModel )
+{
+	auto pCollisionHeader = pTRB->GetSymbols()->Find<TTMDBase::CollisionHeader>( pTRB->GetSections(), "Collision" );
+	if ( !pCollisionHeader ) return;
+
+	pModel->iNumCollisionMeshes = pTRB->ConvertEndianess( pCollisionHeader->m_iNumMeshes );
+	if ( pModel->iNumCollisionMeshes <= 0 ) return;
+
+	pModel->pCollisionMeshes = new ResourceLoader::Model::CollisionMeshInfo[ pModel->iNumCollisionMeshes ];
+
+	for ( TINT i = 0; i < pModel->iNumCollisionMeshes; i++ )
+	{
+		auto& rCollisionMesh = pCollisionHeader->m_pMeshes[ i ];
+
+		const TINT  iBoneID       = pTRB->ConvertEndianess( rCollisionMesh.m_iBoneID );
+		const TUINT uiNumVertices = pTRB->ConvertEndianess( rCollisionMesh.m_uiNumVertices );
+		const TUINT uiNumIndices  = pTRB->ConvertEndianess( rCollisionMesh.m_uiNumIndices );
+
+		auto& rOutCollisionMesh = pModel->pCollisionMeshes[ i ];
+		rOutCollisionMesh.iBoneID       = iBoneID;
+		rOutCollisionMesh.uiNumVertices = uiNumVertices;
+		rOutCollisionMesh.uiNumIndices  = uiNumIndices;
+
+		const TUINT uiNumCollTypes = pTRB->ConvertEndianess( rCollisionMesh.m_uiNumCollTypes );
+		for ( TUINT k = 0; k < uiNumCollTypes; k++ )
+		{
+			auto& rCollisionGroup = rCollisionMesh.m_pCollGroups[ k ];
+
+			auto& rOutCollisionGroup = rOutCollisionMesh.vecGroups.PushBack();
+			rOutCollisionGroup.strName    = rCollisionGroup.pszName ? rCollisionGroup.pszName : "default";
+			rOutCollisionGroup.uiNumFaces = pTRB->ConvertEndianess( rCollisionGroup.uiNumFaces );
+		}
+	}
+}
+
 static TTMDBase::Material* FindMaterialInModel( const TCHAR* a_szName )
 {
 	for ( TINT i = 0; i < s_oCurrentModelMaterialsHeader.iNumMaterials; i++ )
@@ -427,6 +462,8 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 				break;
 		}
 	}
+
+	ModelLoader_LoadCollision_Barnyard( pTRB, pModel.Get() );
 
 	pModel->eModelType = eFiguredOutModelType;
 
