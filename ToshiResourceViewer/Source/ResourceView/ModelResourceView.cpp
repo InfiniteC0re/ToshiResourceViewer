@@ -60,10 +60,18 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 
 	if ( m_bIsExternal )
 	{
-		// Create from GLTF
+		const TString8 strPath = pchFilePath.Get();
 
-		// Skinned mesh
-		ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( pchFilePath ), m_ModelInstance );
+		if ( strPath.EndsWithNoCase( ".xml" ) )
+		{
+			// Create from the model's XML (applies its own animation/bone filters)
+			LoadModelFromXML( strPath.GetString() );
+		}
+		else
+		{
+			// Create straight from a GLTF
+			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( pchFilePath ), m_ModelInstance );
+		}
 	}
 	else
 	{
@@ -112,6 +120,66 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
 
 	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid() && ( TryFixingMissingTKL(), TTRUE );
+}
+
+void ModelResourceView::LoadModelFromXML( const TCHAR* pchXMLPath )
+{
+	tinyxml2::XMLDocument oXML;
+	if ( oXML.LoadFile( pchXMLPath ) != tinyxml2::XML_SUCCESS ) return;
+
+	auto pTMDL = oXML.FirstChildElement( "TMDL" );
+	if ( !pTMDL ) return;
+
+	// Resolve the source GLTF next to the XML (decompile writes both together, so
+	// a moved pair still loads even though the stored Source path is absolute)
+	const TString8 strXMLPath = pchXMLPath;
+	const TINT     iXMLSlash  = TMath::Max( strXMLPath.FindReverse( '\\' ), strXMLPath.FindReverse( '/' ) );
+	TString8       strDir;
+	strDir.Copy( strXMLPath, iXMLSlash + 1 );
+
+	const TCHAR*   pchSource   = pTMDL->Attribute( "Source" );
+	const TString8 strSource   = pchSource ? pchSource : "";
+	const TINT     iSrcSlash   = TMath::Max( strSource.FindReverse( '\\' ), strSource.FindReverse( '/' ) );
+	const TString8 strSrcName  = ( iSrcSlash != -1 ) ? TString8( strSource.GetString( iSrcSlash + 1 ) ) : strSource;
+	const TString8 strGltfPath = TString8::VarArgs( "%s%s", strDir.GetString(), strSrcName.GetString() );
+
+	// Build the model's own animation and bone filters from the XML, mapping the
+	// shared GLTF names (GltfName) back to this model's own sequence/bone names
+	ResourceLoader::AnimationFilter oAnimFilter;
+	ResourceLoader::BoneFilter      oBoneFilter;
+
+	if ( auto pSkel = pTMDL->FirstChildElement( "TSkeleton" ) )
+	{
+		auto pSeqs = pSkel->FirstChildElement( "Sequences" );
+		for ( auto pSeq = pSeqs ? pSeqs->FirstChildElement( "Sequence" ) : TNULL; pSeq; pSeq = pSeq->NextSiblingElement( "Sequence" ) )
+		{
+			const TCHAR* pchName = pSeq->Attribute( "Name" );
+			if ( !pchName ) continue;
+
+			const TCHAR* pchGltfName = pSeq->Attribute( "GltfName" );
+			oAnimFilter.PushBack( { pchGltfName ? pchGltfName : pchName, pchName } );
+		}
+
+		auto pBones = pSkel->FirstChildElement( "Bones" );
+		for ( auto pBone = pBones ? pBones->FirstChildElement( "Bone" ) : TNULL; pBone; pBone = pBone->NextSiblingElement( "Bone" ) )
+		{
+			const TCHAR* pchName = pBone->Attribute( "Name" );
+			if ( !pchName ) continue;
+
+			const TCHAR* pchGltfName = pBone->Attribute( "GltfName" );
+			oBoneFilter.PushBack( { pchGltfName ? pchGltfName : pchName, pchName } );
+		}
+	}
+
+	ResourceLoader::ModelLoader_SetAnimationFilter( oAnimFilter.IsEmpty() ? TNULL : &oAnimFilter );
+	ResourceLoader::ModelLoader_SetBoneFilter( oBoneFilter.IsEmpty() ? TNULL : &oBoneFilter );
+
+	ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( strGltfPath.GetString() ), m_ModelInstance );
+
+	ResourceLoader::ModelLoader_SetAnimationFilter( TNULL );
+	ResourceLoader::ModelLoader_SetBoneFilter( TNULL );
+
+	DeserializeModelInformation( &oXML );
 }
 
 TBOOL ModelResourceView::CanSave()

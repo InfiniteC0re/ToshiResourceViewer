@@ -35,6 +35,10 @@ public:
 	void DeserializeModelInformation( tinyxml2::XMLDocument* pInput );
 
 private:
+	// Loads the model referenced by a decompiled XML, applying the animation and
+	// bone filters it lists so a shared merged GLTF previews as just this model
+	void LoadModelFromXML( const TCHAR* pchXMLPath );
+
 	Toshi::T2FormatString64       m_strDockspaceId;
 	Toshi::T2FormatString64       m_strSequencesId;
 	Toshi::T2FormatString64       m_strViewportId;

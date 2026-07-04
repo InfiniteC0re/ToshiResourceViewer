@@ -1018,6 +1018,8 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 					TBOOL           bResult   = GenerateStrips( vecLocalIndices.data(), TUINT( vecLocalIndices.size() ), &pPrims, &iNumPrims );
 					TASSERT( bResult == TTRUE && iNumPrims == 1 );
 
+					T2VertexArray::Unbind();
+
 					pSubMesh->uiNumIndices  = pPrims->numIndices;
 					pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pPrims->indices, pPrims->numIndices, GL_STATIC_DRAW );
 					pSubMesh->uiEndVertexId = vecVertices.Size();

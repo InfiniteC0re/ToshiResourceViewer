@@ -210,7 +210,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 		ImGui::DockSpace( dockspaceId );
 
 		constexpr const TCHAR* TRB_FILE_FILTER  = "TOSHI Engine Files (trb, trz, ttl, tkl){.trb,.trz,.ttl,.tkl}";
-		constexpr const TCHAR* GLTF_FILE_FILTER = "3D Model Files (gltf){.gltf}";
+		constexpr const TCHAR* GLTF_FILE_FILTER = "3D Model Files (gltf, xml){.gltf,.xml}";
 
 		if ( ImGui::BeginMainMenuBar() )
 		{
@@ -234,7 +234,7 @@ TBOOL Application::OnUpdate( TFLOAT flDeltaTime )
 					IGFD::FileDialogConfig config;
 					config.path = ".";
 
-					ImGuiFileDialog::Instance()->OpenDialog( "ChooseGLTFFile", "Choose GLTF File", GLTF_FILE_FILTER, config );
+					ImGuiFileDialog::Instance()->OpenDialog( "ChooseGLTFFile", "Choose Model File (GLTF or XML)", GLTF_FILE_FILTER, config );
 				}
 
 				if ( ImGui::MenuItem( "Texture Unpacker" ) )
