@@ -31,6 +31,12 @@ TOSHI_NAMESPACE_USING
 // Specify builder to compile models with common key library
 static TKLBuilder* s_pTKLBuilder = TNULL;
 
+// When set, only the listed glTF animations are compiled (see AnimationFilter)
+static const ResourceLoader::AnimationFilter* s_pAnimationFilter = TNULL;
+
+// When set, only the listed bones are compiled (see BoneFilter)
+static const ResourceLoader::BoneFilter* s_pBoneFilter = TNULL;
+
 static void ModelLoader_InitLODDistances( TFLOAT* a_pLODDistances )
 {
 	a_pLODDistances[ 0 ] = 5.0f;
@@ -276,31 +282,76 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		// Get animations
 		static TBOOL bAllowDuplicates = g_pCmd->HasParameter( "-allow-duplicates" );
 
+		// vecAnimations pairs a glTF animation index with the sequence name to write
 		T2DynamicVector<T2Pair<TSIZE, TString8>> vecAnimations;
-		for ( TSIZE i = 0; i < gltfModel.animations.size(); i++ )
+
+		if ( s_pAnimationFilter )
 		{
-			const std::string& strAnimName = gltfModel.animations[ i ].name;
-			if ( !bAllowDuplicates )
+			// Compile only the animations the model references, renaming each glTF
+			// animation to its sequence name (see merged models sharing one glTF)
+			for ( TINT f = 0; f < s_pAnimationFilter->Size(); f++ )
 			{
-				// Check ending of the name (f.e. .001)
-				if ( strAnimName.size() > 4 && strAnimName[ strAnimName.size() - 4 ] == '.' && std::isdigit( strAnimName[ strAnimName.size() - 3 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 2 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 1 ] ) )
+				const auto& rEntry = ( *s_pAnimationFilter )[ f ];
+
+				TSIZE iGltfAnim = TSIZE( -1 );
+				for ( TSIZE i = 0; i < gltfModel.animations.size(); i++ )
+					if ( rEntry.first.CompareNoCase( gltfModel.animations[ i ].name.c_str() ) == 0 ) { iGltfAnim = i; break; }
+
+				if ( iGltfAnim == TSIZE( -1 ) )
+				{
+					TWARN( "Animation '%s' referenced by the model is missing from the GLTF\n", rEntry.first.GetString() );
 					continue;
+				}
 
-				// Check the name is already in the list
-				TBOOL bDuplicate = TFALSE;
-				for ( TINT k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
-					bDuplicate = ( vecAnimations[ k ].second.CompareNoCase( strAnimName.c_str() ) == 0 );
-
-				if ( bDuplicate ) continue;
+				vecAnimations.PushBack( { iGltfAnim, rEntry.second } );
 			}
+		}
+		else
+		{
+			for ( TSIZE i = 0; i < gltfModel.animations.size(); i++ )
+			{
+				const std::string& strAnimName = gltfModel.animations[ i ].name;
+				if ( !bAllowDuplicates )
+				{
+					// Check ending of the name (f.e. .001)
+					if ( strAnimName.size() > 4 && strAnimName[ strAnimName.size() - 4 ] == '.' && std::isdigit( strAnimName[ strAnimName.size() - 3 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 2 ] ) && std::isdigit( strAnimName[ strAnimName.size() - 1 ] ) )
+						continue;
 
-			vecAnimations.PushBack( { i, strAnimName.c_str() } );
+					// Check the name is already in the list
+					TBOOL bDuplicate = TFALSE;
+					for ( TINT k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
+						bDuplicate = ( vecAnimations[ k ].second.CompareNoCase( strAnimName.c_str() ) == 0 );
+
+					if ( bDuplicate ) continue;
+				}
+
+				vecAnimations.PushBack( { i, strAnimName.c_str() } );
+			}
 		}
 
 		// Initialise TSkeleton
 		pModel->pSkeleton = new TSkeleton();
 
-		const TINT iNumBones = TINT( pGLTFSkin->joints.size() );
+		// Select the joints to compile. With a bone filter (merged models sharing a
+		// GLTF) only the model's own bones are kept, otherwise all of them
+		T2DynamicVector<TINT> vecIncludedJoints; // indices into pGLTFSkin->joints
+		for ( TSIZE j = 0; j < pGLTFSkin->joints.size(); j++ )
+		{
+			if ( s_pBoneFilter )
+			{
+				const std::string& strJointName = gltfModel.nodes[ pGLTFSkin->joints[ j ] ].name;
+
+				TBOOL bAllowed = TFALSE;
+				for ( TINT f = 0; !bAllowed && f < s_pBoneFilter->Size(); f++ )
+					bAllowed = ( ( *s_pBoneFilter )[ f ].CompareNoCase( strJointName.c_str() ) == 0 );
+
+				if ( !bAllowed ) continue;
+			}
+
+			vecIncludedJoints.PushBack( TINT( j ) );
+		}
+
+		const TINT iNumBones = vecIncludedJoints.Size();
 		const TINT iNumSeq   = TINT( vecAnimations.Size() );
 
 		pModel->pSkeleton->m_iBoneCount         = iNumBones;
@@ -319,7 +370,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		TSkeletonBone* pBones       = pModel->pSkeleton->m_pBones;
 		for ( TINT i = 0; i < iNumBones; i++ )
 		{
-			auto  gltfBoneIdx = pGLTFSkin->joints[ i ];
+			auto  gltfBoneIdx = pGLTFSkin->joints[ vecIncludedJoints[ i ] ];
 			auto& gltfBone    = gltfModel.nodes[ gltfBoneIdx ];
 			auto& strBoneName = gltfBone.name;
 
@@ -354,7 +405,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		// Setup parent bones
 		for ( TINT i = 0; i < iNumBones; i++ )
 		{
-			auto  gltfBoneIdx = pGLTFSkin->joints[ i ];
+			auto  gltfBoneIdx = pGLTFSkin->joints[ vecIncludedJoints[ i ] ];
 			auto& gltfBone    = gltfModel.nodes[ gltfBoneIdx ];
 
 			const TINT           iThisBoneIdx = mapGltfBoneToTRVBone[ gltfBoneIdx ]->second;
@@ -362,7 +413,10 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 			for ( TUINT k = 0; k < gltfBone.children.size(); k++ )
 			{
-				TINT iChildrenBoneIdx = mapGltfBoneToTRVBone[ gltfBone.children[ k ] ]->second;
+				auto itChild = mapGltfBoneToTRVBone.Find( gltfBone.children[ k ] );
+				if ( itChild == mapGltfBoneToTRVBone.End() ) continue; // child bone filtered out
+
+				TINT iChildrenBoneIdx = itChild->second;
 
 				pBones[ iChildrenBoneIdx ].m_iParentBone = iThisBoneIdx;
 				oWorldSpaceBones.Set( iChildrenBoneIdx, TFALSE );
@@ -418,7 +472,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		{
 			auto  pSeq        = &pSeqs[ i ];
 			auto& gltfAnim    = gltfModel.animations[ vecAnimations[ i ].first ];
-			auto  strAnimName = TString8( gltfAnim.name.c_str() );
+			auto  strAnimName = vecAnimations[ i ].second;
 
 			// Calculate animation duration and find all keys
 			T2Map<TINT, T2DynamicVector<TINT>> mapBoneChannels;
@@ -433,7 +487,10 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				const TFLOAT flKeyTime = TFLOAT( gltfModel.accessors[ gltfAnimSampler.input ].maxValues[ 0 ] );
 				flAnimDuration         = TMath::Max( flAnimDuration, flKeyTime );
 
-				const TINT iTRBBone = mapGltfBoneToTRVBone[ gltfAnimChannel.target_node ]->second;
+				auto itChannelBone = mapGltfBoneToTRVBone.Find( gltfAnimChannel.target_node );
+				if ( itChannelBone == mapGltfBoneToTRVBone.End() ) continue; // channel targets a filtered bone
+
+				const TINT iTRBBone = itChannelBone->second;
 				if ( mapBoneChannels.Find( iTRBBone ) == mapBoneChannels.End() )
 					mapBoneChannels.Insert( iTRBBone, {} );
 
@@ -596,6 +653,13 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		pModel->oSkeletonHeader.m_iTBaseIndex = iTBaseIndex;
 		pModel->oSkeletonHeader.m_iQBaseIndex = iQBaseIndex;
 		pModel->oSkeletonHeader.m_iSBaseIndex = iSBaseIndex;
+
+		// Sequence bone keyframes reference the TKL with 16-bit indices, so a model
+		// can hold at most 0x10000 keys. Without compression a large model exceeds
+		// this and its keyframe indices wrap around, distorting the animations
+		constexpr TINT KEYFRAME_INDEX_LIMIT = 0x10000;
+		if ( pModel->oSkeletonHeader.m_iTKeyCount > KEYFRAME_INDEX_LIMIT || pModel->oSkeletonHeader.m_iQKeyCount > KEYFRAME_INDEX_LIMIT )
+			TERROR( "Model '%s' has too many keyframes for the 16-bit TKL index (translations=%d, rotations=%d, max=%d). Compile it with TKL compression enabled or its animations will be corrupted\n", pchFilePath.Get(), pModel->oSkeletonHeader.m_iTKeyCount, pModel->oSkeletonHeader.m_iQKeyCount, KEYFRAME_INDEX_LIMIT );
 
 		if ( bGlobalTKLBuilder )
 			pModel->pKeyLib = Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( pTKLBuilder->GetName() ) );
@@ -867,10 +931,17 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 					TUINT8* pJoints = (TUINT8*)( &*( pGltfDataJoints + ( uiJointsBufferStride * m ) + gltfJointsAccessor.byteOffset ) );
 
-					TINT iBoneIndex1 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 0 ] ] ]->second : 0;
-					TINT iBoneIndex2 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 1 ] ] ]->second : 0;
-					TINT iBoneIndex3 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 2 ] ] ]->second : 0;
-					TINT iBoneIndex4 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 3 ] ] ]->second : 0;
+					// Filtered-out bones never carry weights, so map them to bone 0
+					auto fnJointToBone = [ & ]( TUINT8 uiJointSlot ) -> TINT {
+						if ( !pGLTFSkin ) return 0;
+						auto it = mapGltfBoneToTRVBone.Find( pGLTFSkin->joints[ uiJointSlot ] );
+						return ( it != mapGltfBoneToTRVBone.End() ) ? it->second : 0;
+					};
+
+					TINT iBoneIndex1 = fnJointToBone( pJoints[ 0 ] );
+					TINT iBoneIndex2 = fnJointToBone( pJoints[ 1 ] );
+					TINT iBoneIndex3 = fnJointToBone( pJoints[ 2 ] );
+					TINT iBoneIndex4 = fnJointToBone( pJoints[ 3 ] );
 
 					// Read weights
 					TFLOAT flWeight1, flWeight2, flWeight3, flWeight4;
@@ -1060,6 +1131,16 @@ TBOOL ResourceLoader::Model_CreateInstance( Toshi::T2SharedPtr<Model> pModel, Mo
 void ResourceLoader::ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder )
 {
 	s_pTKLBuilder = pTKLBuilder;
+}
+
+void ResourceLoader::ModelLoader_SetAnimationFilter( const AnimationFilter* pFilter )
+{
+	s_pAnimationFilter = pFilter;
+}
+
+void ResourceLoader::ModelLoader_SetBoneFilter( const BoneFilter* pFilter )
+{
+	s_pBoneFilter = pFilter;
 }
 
 ResourceLoader::Model::Model()

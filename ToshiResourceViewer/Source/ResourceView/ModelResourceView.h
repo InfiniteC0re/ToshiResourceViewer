@@ -44,6 +44,10 @@ private:
 
 	TBOOL m_bAutoSaveTKL;
 
+	// Texture path per material name from the XML, used to override the (often
+	// stripped) glTF texture path on save
+	Toshi::T2Map<Toshi::TPString8, Toshi::TString8, Toshi::TPString8::Comparator> m_mapXMLTextureOverrides;
+
 	Toshi::T2Camera        m_oCamera;
 	Toshi::T2RenderContext m_oRenderContext;
 	Toshi::T2FrameBuffer   m_ViewportFrameBuffer;

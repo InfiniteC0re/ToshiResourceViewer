@@ -250,6 +250,11 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 			Mesh* pMesh = TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] );
 			pMesh->GetMaterialInfo( strMaterialName, strTextureName );
 
+			// Prefer the texture path from the XML when the model is compiled from one
+			auto itOverride = m_mapXMLTextureOverrides.Find( TPS8D( strMaterialName ) );
+			if ( itOverride != m_mapXMLTextureOverrides.End() )
+				strTextureName = itOverride->second;
+
 			if ( mapMaterials.Find( TPS8D( strMaterialName ) ) == mapMaterials.End() )
 			{
 				// It's the first time we encounter this material
@@ -1504,6 +1509,19 @@ void ModelResourceView::DeserializeModelInformation( tinyxml2::XMLDocument* pInp
 {
 	auto pTMDLElem = pInput->FirstChildElement( "TMDL" );
 	if ( !pTMDLElem ) return;
+
+	// Texture path per material, so OnSave can override the glTF texture (Blender
+	// strips or drops it)
+	if ( auto pMaterialsElem = pTMDLElem->FirstChildElement( "Materials" ) )
+	{
+		for ( auto pMatElem = pMaterialsElem->FirstChildElement( "Material" ); pMatElem != TNULL; pMatElem = pMatElem->NextSiblingElement( "Material" ) )
+		{
+			const TCHAR* pchName    = pMatElem->Attribute( "Name" );
+			const TCHAR* pchTexture = pMatElem->Attribute( "Texture" );
+			if ( pchName && pchTexture )
+				m_mapXMLTextureOverrides.Insert( TPS8D( pchName ), pchTexture );
+		}
+	}
 
 	if ( auto pLODsElem = pTMDLElem->FirstChildElement( "LODs" ) )
 	{

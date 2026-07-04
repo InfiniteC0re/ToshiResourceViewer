@@ -165,20 +165,70 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			ResourceLoader::ModelLoader_SetTKLBuilder( &oTKLBuilder );
 
 			T2DynamicVector<ModelResourceView*> vecModelViews;
+			T2DynamicVector<TString8>           vecOutputNames; // parallel to vecModelViews
 
 			T2_FOREACH( vecInputFiles, itInput )
 			{
 				if ( !itInput->bCanCompile ) continue;
 
+				// Restrict the load to the animations this model references, so a
+				// merged model only pulls its own sequences from the shared GLTF
+				ResourceLoader::AnimationFilter oAnimFilter;
+				if ( itInput->pXML )
+				{
+					auto pTMDL = itInput->pXML->FirstChildElement( "TMDL" );
+					auto pSkel = pTMDL ? pTMDL->FirstChildElement( "TSkeleton" ) : TNULL;
+					auto pSeqs = pSkel ? pSkel->FirstChildElement( "Sequences" ) : TNULL;
+
+					for ( auto pSeq = pSeqs ? pSeqs->FirstChildElement( "Sequence" ) : TNULL; pSeq; pSeq = pSeq->NextSiblingElement( "Sequence" ) )
+					{
+						const TCHAR* pchName = pSeq->Attribute( "Name" );
+						if ( !pchName ) continue;
+
+						const TCHAR* pchGltfName = pSeq->Attribute( "GltfName" );
+						oAnimFilter.PushBack( { pchGltfName ? pchGltfName : pchName, pchName } );
+					}
+				}
+
+				// Restrict the load to the bones this model lists, so a model sharing a
+				// merged GLTF keeps only its own skeleton
+				ResourceLoader::BoneFilter oBoneFilter;
+				if ( itInput->pXML )
+				{
+					auto pTMDL  = itInput->pXML->FirstChildElement( "TMDL" );
+					auto pSkel  = pTMDL ? pTMDL->FirstChildElement( "TSkeleton" ) : TNULL;
+					auto pBones = pSkel ? pSkel->FirstChildElement( "Bones" ) : TNULL;
+
+					for ( auto pBone = pBones ? pBones->FirstChildElement( "Bone" ) : TNULL; pBone; pBone = pBone->NextSiblingElement( "Bone" ) )
+					{
+						const TCHAR* pchName = pBone->Attribute( "Name" );
+						if ( pchName ) oBoneFilter.PushBack( pchName );
+					}
+				}
+
+				ResourceLoader::ModelLoader_SetAnimationFilter( oAnimFilter.IsEmpty() ? TNULL : &oAnimFilter );
+				ResourceLoader::ModelLoader_SetBoneFilter( oBoneFilter.IsEmpty() ? TNULL : &oBoneFilter );
+
 				ModelResourceView* pModelResView = new ModelResourceView();
 				pModelResView->CreateExternal( itInput->strFilePath.GetString() );
+
+				ResourceLoader::ModelLoader_SetAnimationFilter( TNULL );
+				ResourceLoader::ModelLoader_SetBoneFilter( TNULL );
 
 				if ( itInput->pXML )
 					pModelResView->DeserializeModelInformation( itInput->pXML );
 
 				pModelResView->SetAutoSaveTKL( TFALSE ); // will save it later
 
+				// Output name comes from the model's own XML, not its (possibly shared) GLTF
+				TString8   strXml   = itInput->strXMLFilePath;
+				const TINT iSlash   = TMath::Max( strXml.FindReverse( '\\' ), strXml.FindReverse( '/' ) );
+				TString8   strBase  = ( iSlash != -1 ) ? TString8( strXml.GetString( iSlash + 1 ) ) : strXml;
+				const TINT iDot     = strBase.FindReverse( '.' );
+				TString8   strOutput = !strBase.IsEmpty() ? strBase.Mid( 0, iDot != -1 ? iDot : strBase.Length() ) : pModelResView->GetFileName().Mid( 0, pModelResView->GetFileName().FindReverse( '.' ) );
+
 				vecModelViews.PushBack( pModelResView );
+				vecOutputNames.PushBack( strOutput );
 			}
 
 			// Complete the keylib with builder's data
@@ -194,7 +244,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 				oOutModel.GetSections()->CreateStream();
 				pModelResView->OnSave( &oOutModel );
 
-				TString8 strModelName = bUseSourceNames ? pModelResView->GetFileName().Mid( 0, pModelResView->GetFileName().FindReverse( '.' ) ) : g_pCmd->GetParameterValue( "-name", strFallbackName );
+				TString8 strModelName = bUseSourceNames ? vecOutputNames[ it.Index() ] : g_pCmd->GetParameterValue( "-name", strFallbackName );
 				oOutModel.WriteToFile( TString8::VarArgs( "%s\\%s.trb", strOutputPath.GetString(), strModelName.GetString() ).GetString(), bCompress );
 
 				if ( it.Index() + 1 == vecModelViews.Size() )
@@ -258,8 +308,10 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 		{
 			tinygltf::Model*       pGLTFModel;
 			tinyxml2::XMLDocument* pXML;
+			TString8               strFileName; // output base name (no extension)
 			TBOOL                  bValid;
 			TBOOL                  bMerged;
+			TINT                   iMergeTarget; // index of the primary this folds into, or -1
 		};
 
 		T2DynamicVector<DecompiledModel> vecDecompiled;
@@ -269,10 +321,11 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 		auto             fnMoveCursor = [ & ]() {
 			pModelCursor = &vecDecompiled.PushBack();
 
-			pModelCursor->pGLTFModel = new tinygltf::Model;
-			pModelCursor->pXML       = new tinyxml2::XMLDocument;
-			pModelCursor->bValid     = TFALSE;
-			pModelCursor->bMerged    = TFALSE;
+			pModelCursor->pGLTFModel   = new tinygltf::Model;
+			pModelCursor->pXML         = new tinyxml2::XMLDocument;
+			pModelCursor->bValid       = TFALSE;
+			pModelCursor->bMerged      = TFALSE;
+			pModelCursor->iMergeTarget = -1;
 
 			pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewDeclaration() );
 			pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewComment( "Decompiled with Toshi Resource Viewer" ) );
@@ -280,7 +333,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 		tinygltf::TinyGLTF gltfWriter;
 
-		auto fnExportModel = [ &strOutputPath, &pModelCursor, &fnMoveCursor, &gltfWriter ]( PTRB& oInTRB, const TString8& strFilePath ) -> TPString8 {
+		auto fnExportModel = [ &strOutputPath, &pModelCursor, &fnMoveCursor, &gltfWriter, bMerge ]( PTRB& oInTRB, const TString8& strFilePath ) -> TPString8 {
 			const TINT iLastSlashIndex   = strFilePath.FindReverse( '\\' );
 			TString8   strInputFile      = ( iLastSlashIndex != -1 ) ? TString8( strFilePath.GetString( iLastSlashIndex + 1 ) ) : strFilePath;
 			TString8   strInputFileNoExt = strInputFile.Mid( 0, strInputFile.FindReverse( '.' ) );
@@ -294,21 +347,24 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 			oModelResView.TryFixingMissingTKL();
 
 			oModelResView.SerializeModelInformation( pModelCursor->pXML );
-			pModelCursor->bValid = oModelResView.ExportScene( *pModelCursor->pGLTFModel );
+			pModelCursor->bValid       = oModelResView.ExportScene( *pModelCursor->pGLTFModel );
+			pModelCursor->strFileName  = strInputFileNoExt;
 
 			if ( pModelCursor->bValid )
 			{
-				TString8 strOutGLTFPath = TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), strInputFileNoExt.GetString() );
+				pModelCursor->pXML->FirstChildElement( "TMDL" )->SetAttribute( "Output", strFilePath.GetString() );
 
-				// Write model to the file
-				gltfWriter.WriteGltfSceneToFile( pModelCursor->pGLTFModel, strOutGLTFPath.GetString(), TFALSE, TTRUE, TTRUE, TFALSE );
+				// When merging, GLTFs and XMLs are written in a final pass so that
+				// duplicates can be folded into their primary first
+				if ( !bMerge )
+				{
+					TString8 strOutGLTFPath = TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), strInputFileNoExt.GetString() );
 
-				auto pTMDLElem = pModelCursor->pXML->FirstChildElement( "TMDL" );
+					gltfWriter.WriteGltfSceneToFile( pModelCursor->pGLTFModel, strOutGLTFPath.GetString(), TFALSE, TTRUE, TTRUE, TFALSE );
 
-				pTMDLElem->SetAttribute( "Source", strOutGLTFPath.GetString() );
-				pTMDLElem->SetAttribute( "Output", strFilePath.GetString() );
-
-				pModelCursor->pXML->SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), strInputFileNoExt.GetString() ) );
+					pModelCursor->pXML->FirstChildElement( "TMDL" )->SetAttribute( "Source", strOutGLTFPath.GetString() );
+					pModelCursor->pXML->SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), strInputFileNoExt.GetString() ) );
+				}
 
 				fnMoveCursor();
 				return oModelResView.GetTKLName();
@@ -459,171 +515,450 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 			if ( bMerge )
 			{
-				// Try to merge models... Fuck it...
-				// We need to find all equal models and merge them into a single one, because the only difference is animations
-				T2_FOREACH( vecDecompiled, it )
-				{
-					// Skip invalid models or the ones already merged
-					if ( !it->bValid || it->bMerged ) continue;
+				// Collects the unique vertices (position + normal + uv + skinning),
+				// quantizing floats so that decompile noise and different vertex
+				// splitting/ordering don't matter, while staying discriminating enough
+				// to tell unrelated models apart
+				auto fnUniqueVertices = []( const tinygltf::Model& rModel ) -> std::vector<std::string> {
+					static const char* s_apAttrs[] = { "POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0" };
 
-					const TSIZE iNumMats   = it->pGLTFModel->materials.size();
-					const TSIZE iNumMeshes = it->pGLTFModel->meshes.size();
-					const TSIZE iNumSkins  = it->pGLTFModel->skins.size();
-					if ( iNumMats == 0 || iNumMeshes == 0 || iNumSkins == 0 )
+					std::vector<std::string> vecVertices;
+					for ( const auto& rMesh : rModel.meshes )
 					{
-						it->bMerged = TTRUE;
-						continue;
+						for ( const auto& rPrim : rMesh.primitives )
+						{
+							auto itPos = rPrim.attributes.find( "POSITION" );
+							if ( itPos == rPrim.attributes.end() ) continue;
+
+							const TSIZE uiCount = rModel.accessors[ itPos->second ].count;
+							for ( TSIZE k = 0; k < uiCount; k++ )
+							{
+								std::string strVertex;
+								for ( const char* pchAttr : s_apAttrs )
+								{
+									auto itAttr = rPrim.attributes.find( pchAttr );
+									if ( itAttr == rPrim.attributes.end() ) continue;
+
+									const auto&  rAcc    = rModel.accessors[ itAttr->second ];
+									const auto&  rView   = rModel.bufferViews[ rAcc.bufferView ];
+									const auto&  rBuf    = rModel.buffers[ rView.buffer ];
+									const TSIZE  uiComp  = TSIZE( tinygltf::GetNumComponentsInType( rAcc.type ) );
+									const TSIZE  uiElem  = TSIZE( tinygltf::GetComponentSizeInBytes( rAcc.componentType ) ) * uiComp;
+									const TSIZE  uiStride = rView.byteStride ? rView.byteStride : uiElem;
+									const TBYTE* pData   = rBuf.data.data() + rView.byteOffset + rAcc.byteOffset + k * uiStride;
+
+									if ( rAcc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT )
+									{
+										for ( TSIZE c = 0; c < uiComp; c++ )
+										{
+											const TINT32 iQuant = TINT32( std::lround( TREINTERPRETCAST( const TFLOAT*, pData )[ c ] * 10000.0f ) );
+											strVertex.append( TREINTERPRETCAST( const char*, &iQuant ), sizeof( iQuant ) );
+										}
+									}
+									else
+									{
+										strVertex.append( TREINTERPRETCAST( const char*, pData ), uiElem );
+									}
+								}
+								vecVertices.push_back( std::move( strVertex ) );
+							}
+						}
+					}
+					std::sort( vecVertices.begin(), vecVertices.end() );
+					vecVertices.erase( std::unique( vecVertices.begin(), vecVertices.end() ), vecVertices.end() );
+					return vecVertices;
+				};
+
+				// Two models can be merged when they share skeleton, geometry and
+				// materials and only differ by their animations (different keylib)
+				auto fnModelsAreDuplicates = [ &fnUniqueVertices ]( const DecompiledModel& rA, const DecompiledModel& rB ) -> TBOOL {
+					tinygltf::Model& rGA = *rA.pGLTFModel;
+					tinygltf::Model& rGB = *rB.pGLTFModel;
+
+					if ( rGA.materials.size() != rGB.materials.size() ) return TFALSE;
+					if ( rGA.meshes.size() != rGB.meshes.size() || rGA.meshes.empty() ) return TFALSE;
+					if ( rGA.skins.size() != 1 || rGB.skins.size() != 1 ) return TFALSE;
+
+					auto pTMDLA = rA.pXML->FirstChildElement( "TMDL" );
+					auto pTMDLB = rB.pXML->FirstChildElement( "TMDL" );
+					if ( !pTMDLA || !pTMDLB ) return TFALSE;
+
+					auto pSkelA = pTMDLA->FirstChildElement( "TSkeleton" );
+					auto pSkelB = pTMDLB->FirstChildElement( "TSkeleton" );
+					if ( !pSkelA || !pSkelB ) return TFALSE;
+
+					// Only worth merging when the animation sets differ
+					auto         pSeqA = pSkelA->FirstChildElement( "Sequences" );
+					auto         pSeqB = pSkelB->FirstChildElement( "Sequences" );
+					const TCHAR* pchKLA = pSeqA ? pSeqA->Attribute( "KeyLibrary" ) : TNULL;
+					const TCHAR* pchKLB = pSeqB ? pSeqB->Attribute( "KeyLibrary" ) : TNULL;
+					if ( pchKLA && pchKLB && T2String8::CompareNoCase( pchKLA, pchKLB ) == 0 ) return TFALSE;
+
+					// Materials must match by name and texture, in order
+					auto pMatA = pTMDLA->FirstChildElement( "Materials" )->FirstChildElement( "Material" );
+					auto pMatB = pTMDLB->FirstChildElement( "Materials" )->FirstChildElement( "Material" );
+					for ( ; pMatA && pMatB; pMatA = pMatA->NextSiblingElement( "Material" ), pMatB = pMatB->NextSiblingElement( "Material" ) )
+					{
+						if ( T2String8::CompareNoCase( pMatA->Attribute( "Name" ), pMatB->Attribute( "Name" ) ) != 0 ) return TFALSE;
+						if ( T2String8::CompareNoCase( pMatA->Attribute( "Texture" ), pMatB->Attribute( "Texture" ) ) != 0 ) return TFALSE;
+					}
+					if ( pMatA || pMatB ) return TFALSE;
+
+					// Skeletons must share a common prefix (matching name, parent and
+					// transform within tolerance). Beyond it each may append its own bones,
+					// as long as the extra names don't collide - they get unioned on merge.
+					// The shared prefix covers every weighted bone (guaranteed by the vertex
+					// check below, which includes joints), so the shared mesh stays valid
+					static const TCHAR* s_apBoneFloats[] = { "PosX", "PosY", "PosZ", "QuatX", "QuatY", "QuatZ", "QuatW" };
+					auto fnBonesMatch = []( tinyxml2::XMLElement* pA, tinyxml2::XMLElement* pB ) -> TBOOL {
+						const TCHAR* a = pA->Attribute( "Name" );
+						const TCHAR* b = pB->Attribute( "Name" );
+						if ( T2String8::Compare( a ? a : "", b ? b : "" ) != 0 ) return TFALSE;
+						if ( pA->IntAttribute( "Parent", -2 ) != pB->IntAttribute( "Parent", -2 ) ) return TFALSE;
+						for ( const TCHAR* attr : s_apBoneFloats )
+							if ( TMath::Abs( pA->FloatAttribute( attr ) - pB->FloatAttribute( attr ) ) > 0.0001f ) return TFALSE;
+						return TTRUE;
+					};
+
+					auto pBonesA = pSkelA->FirstChildElement( "Bones" );
+					auto pBonesB = pSkelB->FirstChildElement( "Bones" );
+					if ( !pBonesA || !pBonesB ) return TFALSE;
+
+					auto pBoneA = pBonesA->FirstChildElement( "Bone" );
+					auto pBoneB = pBonesB->FirstChildElement( "Bone" );
+					while ( pBoneA && pBoneB && fnBonesMatch( pBoneA, pBoneB ) )
+					{
+						pBoneA = pBoneA->NextSiblingElement( "Bone" );
+						pBoneB = pBoneB->NextSiblingElement( "Bone" );
 					}
 
-					const TSIZE iNumBones = it->pGLTFModel->skins[ 0 ].joints.size();
+					// The remaining bones are each skeleton's extras; require disjoint names
+					std::vector<std::string> vecExtraA;
+					for ( auto p = pBoneA; p; p = p->NextSiblingElement( "Bone" ) )
+						if ( const TCHAR* n = p->Attribute( "Name" ) ) vecExtraA.push_back( n );
+					for ( auto p = pBoneB; p; p = p->NextSiblingElement( "Bone" ) )
+					{
+						const TCHAR* n = p->Attribute( "Name" );
+						if ( n && std::find( vecExtraA.begin(), vecExtraA.end(), n ) != vecExtraA.end() ) return TFALSE;
+					}
+
+					// Geometry must cover the same set of vertices, regardless of ordering,
+					// splitting or decompile float noise
+					if ( fnUniqueVertices( rGA ) != fnUniqueVertices( rGB ) ) return TFALSE;
+
+					return TTRUE;
+				};
+
+				// Group duplicates: each surviving model becomes a primary and folds
+				// matching models into itself
+				T2_FOREACH( vecDecompiled, it )
+				{
+					if ( !it->bValid || it->bMerged ) continue;
 
 					T2_FOREACH( vecDecompiled, itOther )
 					{
-						// Skip models we don't want to compare to
 						if ( !itOther->bValid || itOther->bMerged || it == itOther ) continue;
+						if ( !fnModelsAreDuplicates( *it, *itOther ) ) continue;
 
-						// Do fast comparisons first
-						const TSIZE iNumMatsOther   = itOther->pGLTFModel->materials.size();
-						const TSIZE iNumMeshesOther = itOther->pGLTFModel->meshes.size();
-						const TSIZE iNumSkinsOther  = itOther->pGLTFModel->skins.size();
-						if ( iNumMatsOther != iNumMats || iNumMeshesOther != iNumMeshes || iNumSkinsOther == 0 ) continue;
+						// The primary must hold the superset skeleton; if itOther has more
+						// bones let it become the primary when the loop reaches it
+						if ( itOther->pGLTFModel->skins[ 0 ].joints.size() > it->pGLTFModel->skins[ 0 ].joints.size() ) continue;
 
-						const TSIZE iNumBonesOther = itOther->pGLTFModel->skins[ 0 ].joints.size();
-						if ( iNumBonesOther != iNumBones ) continue;
+						const TCHAR* pchPrimary = it->pXML->FirstChildElement( "TMDL" )->Attribute( "Name" );
+						const TCHAR* pchDup     = itOther->pXML->FirstChildElement( "TMDL" )->Attribute( "Name" );
+						TINFO( "Merging %s into %s\n", pchDup, pchPrimary );
 
-						// At this stage we are sure number of various elements is the same, so need to make more deeper comparison
-						auto itTMDL      = it->pXML->FirstChildElement( "TMDL" );
-						auto itOtherTMDL = itOther->pXML->FirstChildElement( "TMDL" );
+						itOther->bMerged      = TTRUE;
+						itOther->iMergeTarget = it.Index();
+					}
+				}
 
-						// First of all, compare materials
-						TBOOL bSame            = TTRUE;
-						auto  itMaterials      = itTMDL->FirstChildElement( "Materials" );
-						auto  itOtherMaterials = itOtherTMDL->FirstChildElement( "Materials" );
-						auto  itMat            = itMaterials->FirstChildElement( "Material" );
-						auto  itOtherMat       = itOtherMaterials->FirstChildElement( "Material" );
-						for ( TSIZE i = 0; bSame && i < iNumMats; i++ )
+				// Flatten merge chains (a primary can later become a duplicate itself):
+				// point every duplicate at its ultimate, non-merged primary
+				T2_FOREACH( vecDecompiled, itChain )
+				{
+					if ( !itChain->bValid || itChain->iMergeTarget < 0 ) continue;
+
+					TINT iTarget = itChain->iMergeTarget;
+					while ( vecDecompiled[ iTarget ].bMerged && vecDecompiled[ iTarget ].iMergeTarget >= 0 )
+						iTarget = vecDecompiled[ iTarget ].iMergeTarget;
+
+					itChain->iMergeTarget = iTarget;
+				}
+
+				auto fnFindNodeByName = []( const tinygltf::Model& rModel, const std::string& rName ) -> TINT {
+					for ( TSIZE i = 0; i < rModel.nodes.size(); i++ )
+						if ( rModel.nodes[ i ].name == rName ) return TINT( i );
+					return -1;
+				};
+
+				// Copies an accessor and the bytes it spans into another model
+				auto fnImportAccessor = []( tinygltf::Model& rDst, const tinygltf::Model& rSrc, TINT iAcc ) -> TINT {
+					const auto& rAcc  = rSrc.accessors[ iAcc ];
+					const auto& rView = rSrc.bufferViews[ rAcc.bufferView ];
+					const auto& rBuf  = rSrc.buffers[ rView.buffer ];
+
+					const TSIZE uiElemSize = TSIZE( tinygltf::GetComponentSizeInBytes( rAcc.componentType ) * tinygltf::GetNumComponentsInType( rAcc.type ) );
+					const TSIZE uiStride   = rView.byteStride ? rView.byteStride : uiElemSize;
+					const TSIZE uiStart    = rView.byteOffset + rAcc.byteOffset;
+					const TSIZE uiLength   = rAcc.count ? ( uiStride * ( rAcc.count - 1 ) + uiElemSize ) : 0;
+
+					tinygltf::Buffer oBuffer;
+					oBuffer.data.assign( rBuf.data.begin() + uiStart, rBuf.data.begin() + uiStart + uiLength );
+					rDst.buffers.push_back( std::move( oBuffer ) );
+
+					tinygltf::BufferView oView;
+					oView.buffer     = TINT( rDst.buffers.size() - 1 );
+					oView.byteOffset = 0;
+					oView.byteLength = uiLength;
+					oView.byteStride = rView.byteStride;
+					rDst.bufferViews.push_back( std::move( oView ) );
+
+					tinygltf::Accessor oAccessor = rAcc;
+					oAccessor.bufferView         = TINT( rDst.bufferViews.size() - 1 );
+					oAccessor.byteOffset         = 0;
+					rDst.accessors.push_back( std::move( oAccessor ) );
+
+					return TINT( rDst.accessors.size() - 1 );
+				};
+
+				// Float accessors are equal within a tolerance, since the same animation
+				// can quantize slightly differently across keylibs
+				constexpr TFLOAT ANIM_MERGE_EPSILON = 0.01f;
+				auto             fnAccessorFloatsEqual = []( const tinygltf::Model& rMA, TINT iAccA, const tinygltf::Model& rMB, TINT iAccB ) -> TBOOL {
+					const auto& rAccA = rMA.accessors[ iAccA ];
+					const auto& rAccB = rMB.accessors[ iAccB ];
+					if ( rAccA.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT || rAccB.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ) return TFALSE;
+					if ( rAccA.type != rAccB.type || rAccA.count != rAccB.count ) return TFALSE;
+
+					const auto& rViewA = rMA.bufferViews[ rAccA.bufferView ];
+					const auto& rViewB = rMB.bufferViews[ rAccB.bufferView ];
+					const auto& rBufA  = rMA.buffers[ rViewA.buffer ];
+					const auto& rBufB  = rMB.buffers[ rViewB.buffer ];
+
+					const TSIZE  uiNumComp  = TSIZE( tinygltf::GetNumComponentsInType( rAccA.type ) );
+					const TSIZE  uiElemSize = uiNumComp * sizeof( TFLOAT );
+					const TSIZE  uiStrideA  = rViewA.byteStride ? rViewA.byteStride : uiElemSize;
+					const TSIZE  uiStrideB  = rViewB.byteStride ? rViewB.byteStride : uiElemSize;
+					const TBYTE* pDataA     = rBufA.data.data() + rViewA.byteOffset + rAccA.byteOffset;
+					const TBYTE* pDataB     = rBufB.data.data() + rViewB.byteOffset + rAccB.byteOffset;
+
+					for ( TSIZE i = 0; i < rAccA.count; i++ )
+					{
+						const TFLOAT* pA = TREINTERPRETCAST( const TFLOAT*, pDataA + i * uiStrideA );
+						const TFLOAT* pB = TREINTERPRETCAST( const TFLOAT*, pDataB + i * uiStrideB );
+						for ( TSIZE c = 0; c < uiNumComp; c++ )
+							if ( TMath::Abs( pA[ c ] - pB[ c ] ) > ANIM_MERGE_EPSILON ) return TFALSE;
+					}
+					return TTRUE;
+				};
+
+				// Two animations are equal when every channel (matched by target bone
+				// and path) has sampler data equal within tolerance
+				auto fnAnimationsEqual = [ &fnAccessorFloatsEqual ]( const tinygltf::Model& rMA, const tinygltf::Animation& rA, const tinygltf::Model& rMB, const tinygltf::Animation& rB ) -> TBOOL {
+					if ( rA.channels.size() != rB.channels.size() ) return TFALSE;
+
+					for ( const auto& rChA : rA.channels )
+					{
+						const std::string& rBoneA = rMA.nodes[ rChA.target_node ].name;
+						const auto&        rSampA = rA.samplers[ rChA.sampler ];
+
+						TBOOL bFound = TFALSE;
+						for ( const auto& rChB : rB.channels )
 						{
-							bSame &= T2String8::CompareNoCase( itMat->Attribute( "Name" ), itOtherMat->Attribute( "Name" ) ) == 0;
-							if ( !bSame ) break;
-							bSame &= T2String8::CompareNoCase( itMat->Attribute( "Texture" ), itOtherMat->Attribute( "Texture" ) ) == 0;
-							if ( !bSame ) break;
+							if ( rChA.target_path != rChB.target_path || rMB.nodes[ rChB.target_node ].name != rBoneA ) continue;
 
-							itMat      = itMat->NextSiblingElement( "Material" );
-							itOtherMat = itOtherMat->NextSiblingElement( "Material" );
+							const auto& rSampB = rB.samplers[ rChB.sampler ];
+							bFound = fnAccessorFloatsEqual( rMA, rSampA.input, rMB, rSampB.input ) && fnAccessorFloatsEqual( rMA, rSampA.output, rMB, rSampB.output );
+							break;
 						}
-						if ( !bSame ) continue;
+						if ( !bFound ) return TFALSE;
+					}
+					return TTRUE;
+				};
 
-						// Compare keylib name
-						if ( 0 == T2String8::CompareNoCase( itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ), itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" ) ) )
+				// Fold each duplicate's animations into its primary, then point the
+				// duplicate's XML at the primary GLTF
+				T2_FOREACH( vecDecompiled, itDup )
+				{
+					if ( !itDup->bValid || itDup->iMergeTarget < 0 ) continue;
+
+					DecompiledModel& rPrimary = vecDecompiled[ itDup->iMergeTarget ];
+					tinygltf::Model& rGDst    = *rPrimary.pGLTFModel;
+					tinygltf::Model& rGSrc    = *itDup->pGLTFModel;
+
+					// Union the skeletons: append any of the duplicate's bones that the
+					// primary lacks (as new joint nodes), so each model can later extract
+					// its own skeleton from the shared GLTF
+					if ( !rGDst.skins.empty() && !rGSrc.skins.empty() && rGDst.skins[ 0 ].inverseBindMatrices >= 0 && rGSrc.skins[ 0 ].inverseBindMatrices >= 0 )
+					{
+						tinygltf::Skin& rSkinDst = rGDst.skins[ 0 ];
+						tinygltf::Skin& rSkinSrc = rGSrc.skins[ 0 ];
+
+						std::vector<std::string> vecPrimaryBones;
+						for ( int iJoint : rSkinDst.joints ) vecPrimaryBones.push_back( rGDst.nodes[ iJoint ].name );
+
+						// Reads MAT4 (64-byte) elements from an inverse-bind-matrix accessor
+						auto fnAppendMatrices = []( std::vector<TBYTE>& rOut, const tinygltf::Model& rModel, TINT iAcc, TINT iStart, TINT iCount ) {
+							const auto&  rAcc    = rModel.accessors[ iAcc ];
+							const auto&  rView   = rModel.bufferViews[ rAcc.bufferView ];
+							const auto&  rBuf    = rModel.buffers[ rView.buffer ];
+							const TSIZE  uiStride = rView.byteStride ? rView.byteStride : 64;
+							const TBYTE* pData   = rBuf.data.data() + rView.byteOffset + rAcc.byteOffset;
+							for ( TINT i = iStart; i < iStart + iCount; i++ )
+								rOut.insert( rOut.end(), pData + i * uiStride, pData + i * uiStride + 64 );
+						};
+
+						std::vector<TBYTE> vecIBM;
+						fnAppendMatrices( vecIBM, rGDst, rSkinDst.inverseBindMatrices, 0, TINT( rSkinDst.joints.size() ) );
+
+						TBOOL bAppended = TFALSE;
+						for ( TSIZE js = 0; js < rSkinSrc.joints.size(); js++ )
 						{
-							// The models are using the same keylib, so skip them...
-							continue;
-						}
+							const int             iSrcJoint = rSkinSrc.joints[ js ];
+							const tinygltf::Node& rSrcNode  = rGSrc.nodes[ iSrcJoint ];
+							if ( std::find( vecPrimaryBones.begin(), vecPrimaryBones.end(), rSrcNode.name ) != vecPrimaryBones.end() ) continue;
 
-						// Compare bones
-						auto itBones      = itTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
-						auto itOtherBones = itOtherTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
+							tinygltf::Node oNode;
+							oNode.name        = rSrcNode.name;
+							oNode.translation = rSrcNode.translation;
+							oNode.rotation    = rSrcNode.rotation;
+							rGDst.nodes.push_back( oNode );
+							const int iNewNode = int( rGDst.nodes.size() - 1 );
 
-						auto itBone = itBones->FirstChildElement( "Bone" );
-						for ( TSIZE i = 0; bSame && i < iNumBones; i++ )
-						{
-							TBOOL bFoundBone  = TFALSE;
-							auto  itOtherBone = itOtherBones->FirstChildElement( "Bone" );
+							rSkinDst.joints.push_back( iNewNode );
+							fnAppendMatrices( vecIBM, rGSrc, rSkinSrc.inverseBindMatrices, TINT( js ), 1 );
 
-							const TCHAR* pchItBoneName  = itBone->Attribute( "Name" );
-							const TCHAR* pchItBonePosX  = itBone->Attribute( "PosX" );
-							const TCHAR* pchItBonePosY  = itBone->Attribute( "PosY" );
-							const TCHAR* pchItBonePosZ  = itBone->Attribute( "PosZ" );
-							const TCHAR* pchItBoneQuatX = itBone->Attribute( "QuatX" );
-							const TCHAR* pchItBoneQuatY = itBone->Attribute( "QuatY" );
-							const TCHAR* pchItBoneQuatZ = itBone->Attribute( "QuatZ" );
-							const TCHAR* pchItBoneQuatW = itBone->Attribute( "QuatW" );
-
-							while ( itOtherBone && !bFoundBone )
+							// Parent it under the same bone as in the source (matched by name)
+							for ( const auto& rSrcParent : rGSrc.nodes )
 							{
-								bFoundBone |= T2String8::Compare( pchItBoneName, itOtherBone->Attribute( "Name" ) ) == 0;
-								if ( bFoundBone ) break;
+								if ( std::find( rSrcParent.children.begin(), rSrcParent.children.end(), iSrcJoint ) == rSrcParent.children.end() ) continue;
 
-								bFoundBone |= T2String8::Compare( pchItBonePosX, itOtherBone->Attribute( "PosX" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBonePosY, itOtherBone->Attribute( "PosY" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBonePosZ, itOtherBone->Attribute( "PosZ" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBoneQuatX, itOtherBone->Attribute( "QuatX" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBoneQuatY, itOtherBone->Attribute( "QuatY" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBoneQuatZ, itOtherBone->Attribute( "QuatZ" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								bFoundBone |= T2String8::Compare( pchItBoneQuatW, itOtherBone->Attribute( "QuatW" ) ) == 0;
-								if ( bFoundBone ) break;
-
-								itOtherBone = itOtherBone->NextSiblingElement( "Bone" );
+								const int iDstParent = fnFindNodeByName( rGDst, rSrcParent.name );
+								if ( iDstParent >= 0 ) rGDst.nodes[ iDstParent ].children.push_back( iNewNode );
+								break;
 							}
 
-							bSame &= bFoundBone;
-							if ( !bSame ) break;
-
-							itBone = itBone->NextSiblingElement( "Bone" );
+							bAppended = TTRUE;
 						}
-						if ( !bSame ) break;
 
-						// Compare meshes, kind of
-						for ( TSIZE i = 0; i < iNumMeshes; i++ )
+						// Rebuild the inverse-bind-matrices accessor with the extended data
+						if ( bAppended )
 						{
-							auto pItMesh      = &it->pGLTFModel->meshes[ i ];
-							auto pItOtherMesh = &itOther->pGLTFModel->meshes[ i ];
+							const TSIZE uiIBMBytes = vecIBM.size();
+							tinygltf::Buffer oBuffer;
+							oBuffer.data = std::move( vecIBM );
+							rGDst.buffers.push_back( std::move( oBuffer ) );
 
-							bSame &= pItMesh->name == pItOtherMesh->name;
-							bSame &= pItMesh->primitives.size() == pItOtherMesh->primitives.size();
-							if ( !bSame ) break;
+							tinygltf::BufferView oView;
+							oView.buffer     = int( rGDst.buffers.size() - 1 );
+							oView.byteOffset = 0;
+							oView.byteLength = uiIBMBytes;
+							rGDst.bufferViews.push_back( oView );
 
-							for ( TSIZE k = 0; k < pItMesh->primitives.size(); k++ )
-							{
-								TBOOL bFound      = TFALSE;
-								TINT  iItIndices  = pItMesh->primitives[ k ].indices;
-								TINT  iItVertices = pItMesh->primitives[ k ].attributes[ "POSITION" ];
+							tinygltf::Accessor oAccessor;
+							oAccessor.bufferView    = int( rGDst.bufferViews.size() - 1 );
+							oAccessor.byteOffset    = 0;
+							oAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+							oAccessor.type          = TINYGLTF_TYPE_MAT4;
+							oAccessor.count         = rSkinDst.joints.size();
+							rGDst.accessors.push_back( oAccessor );
 
-								// Compare by indices and vertices
-								for ( TSIZE j = 0; !bFound && j < pItOtherMesh->primitives.size(); j++ )
-								{
-									TINT iItOtherIndices  = pItOtherMesh->primitives[ k ].indices;
-									TINT iItOtherVertices = pItOtherMesh->primitives[ k ].attributes[ "POSITION" ];
-
-									bFound = it->pGLTFModel->accessors[ iItIndices ].count == itOther->pGLTFModel->accessors[ iItOtherIndices ].count;
-									bFound = it->pGLTFModel->accessors[ iItVertices ].count == itOther->pGLTFModel->accessors[ iItOtherVertices ].count;
-									if ( !bFound ) break;
-
-									// TODO?: compare UV
-								}
-
-								bSame &= bFound;
-								if ( !bSame ) break;
-							}
-							if ( !bSame ) break;
+							rSkinDst.inverseBindMatrices = int( rGDst.accessors.size() - 1 );
 						}
-
-						// Okay... It reached the end and even though bSame might be TFALSE, one more critical check is required
-						// Some models are compiled with different settings (or manually edited), so the previous check might give
-						// false negatives sometimes
-						TString8 strItModelName      = itTMDL->Attribute( "Name" );
-						TString8 strItOtherModelName = itOtherTMDL->Attribute( "Name" );
-
-						if ( !bSame && ( !strItOtherModelName.EndsWithNoCase( "_a2" ) && !strItOtherModelName.EndsWithNoCase( "_a3" ) ) && ( !strItModelName.EndsWithNoCase( "_a2" ) && !strItModelName.EndsWithNoCase( "_a3" ) ) ) break;
-
-						TINFO( "Found duplicates: %s and %s\n", strItModelName.GetString(), strItOtherModelName.GetString() );
-						itOther->bMerged = TTRUE;
 					}
 
-					// Don't process it anymore
-					it->bMerged = TTRUE;
+					std::map<std::string, std::string> mapSeqToGltf; // duplicate sequence name -> primary glTF animation name
+
+					for ( auto& rSrcAnim : rGSrc.animations )
+					{
+						std::string strGltfName;
+
+						// Reuse an identical animation already present in the primary
+						for ( auto& rDstAnim : rGDst.animations )
+						{
+							if ( rDstAnim.name == rSrcAnim.name && fnAnimationsEqual( rGDst, rDstAnim, rGSrc, rSrcAnim ) )
+							{
+								strGltfName = rDstAnim.name;
+								break;
+							}
+						}
+
+						if ( strGltfName.empty() )
+						{
+							// Namespace the name if it is taken by a different animation
+							std::string strName    = rSrcAnim.name;
+							TBOOL       bNameTaken = TFALSE;
+							for ( auto& rDstAnim : rGDst.animations )
+								if ( rDstAnim.name == strName ) { bNameTaken = TTRUE; break; }
+
+							if ( bNameTaken )
+							{
+								const TCHAR* pchKL = itDup->pXML->FirstChildElement( "TMDL" )->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" )->Attribute( "KeyLibrary" );
+								strName += "@";
+								strName += pchKL ? pchKL : itDup->strFileName.GetString();
+							}
+
+							tinygltf::Animation oAnim;
+							oAnim.name     = strName;
+							oAnim.samplers = rSrcAnim.samplers;
+							for ( auto& rSamp : oAnim.samplers )
+							{
+								rSamp.input  = fnImportAccessor( rGDst, rGSrc, rSamp.input );
+								rSamp.output = fnImportAccessor( rGDst, rGSrc, rSamp.output );
+							}
+							for ( const auto& rChSrc : rSrcAnim.channels )
+							{
+								const TINT iNode = fnFindNodeByName( rGDst, rGSrc.nodes[ rChSrc.target_node ].name );
+								if ( iNode < 0 ) continue;
+
+								tinygltf::AnimationChannel oChannel = rChSrc;
+								oChannel.target_node                = iNode;
+								oAnim.channels.push_back( oChannel );
+							}
+
+							rGDst.animations.push_back( std::move( oAnim ) );
+							strGltfName = strName;
+						}
+
+						mapSeqToGltf[ rSrcAnim.name ] = strGltfName;
+					}
+
+					auto pTMDL = itDup->pXML->FirstChildElement( "TMDL" );
+					pTMDL->SetAttribute( "Source", TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), rPrimary.strFileName.GetString() ).GetString() );
+
+					auto pSeqRoot = pTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Sequences" );
+					for ( auto pSeqElem = pSeqRoot->FirstChildElement( "Sequence" ); pSeqElem; pSeqElem = pSeqElem->NextSiblingElement( "Sequence" ) )
+					{
+						auto itMap = mapSeqToGltf.find( pSeqElem->Attribute( "Name" ) );
+						if ( itMap != mapSeqToGltf.end() && itMap->second != pSeqElem->Attribute( "Name" ) )
+							pSeqElem->SetAttribute( "GltfName", itMap->second.c_str() );
+					}
+
+					// The duplicate's GLTF is fully consumed now; free it to keep memory
+					// bounded across a large batch
+					delete itDup->pGLTFModel;
+					itDup->pGLTFModel = TNULL;
+				}
+
+				// Final write: each primary/standalone owns a GLTF; merged duplicates
+				// only save their XML (already pointed at the primary)
+				T2_FOREACH( vecDecompiled, itOut )
+				{
+					if ( !itOut->bValid ) continue;
+
+					if ( !itOut->bMerged )
+					{
+						TString8 strGLTFPath = TString8::VarArgs( "%s\\%s.gltf", strOutputPath.GetString(), itOut->strFileName.GetString() );
+						gltfWriter.WriteGltfSceneToFile( itOut->pGLTFModel, strGLTFPath.GetString(), TFALSE, TTRUE, TTRUE, TFALSE );
+						itOut->pXML->FirstChildElement( "TMDL" )->SetAttribute( "Source", strGLTFPath.GetString() );
+
+						// Release the GLTF once written to keep peak memory down
+						delete itOut->pGLTFModel;
+						itOut->pGLTFModel = TNULL;
+					}
+
+					itOut->pXML->SaveFile( TString8::VarArgs( "%s\\%s.xml", strOutputPath.GetString(), itOut->strFileName.GetString() ) );
 				}
 			}
 		}

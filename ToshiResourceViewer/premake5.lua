@@ -4,6 +4,8 @@ project "ToshiResourceViewer"
 	
 	pchheader "pch.h"
 	pchsource "Source/pch.cpp"
+
+	linkoptions { "/LARGEADDRESSAWARE" }
 	
 	debugdir ("%{wks.location}/Assets")
 	
