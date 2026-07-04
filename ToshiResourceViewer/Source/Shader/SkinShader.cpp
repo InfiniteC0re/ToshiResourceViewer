@@ -2,6 +2,8 @@
 #include "SkinShader.h"
 #include "RendererSettings.h"
 
+#include <unordered_map>
+
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
@@ -167,8 +169,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 {
 	tinygltf::Buffer gltfBuffer;
 
-	TINT iMeshStartIndex = TINT( a_rOutModel.meshes.size() );
-	TINT iBufferIndex    = TINT( a_rOutModel.buffers.size() );
+	TINT iBufferIndex = TINT( a_rOutModel.buffers.size() );
 
 	//-----------------------------------------------------------------------------
 	// 1. Materials
@@ -217,7 +218,7 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	GLint iVertexBufferSize = 0;
 	oVertexBuffer.GetParameter( GL_BUFFER_SIZE, iVertexBufferSize );
 
-	const TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
+	TUINT uiNumTotalVertices = iVertexBufferSize / sizeof( SkinVertex );
 
 	// Allocate array for the vertex data
 	Toshi::T2DynamicVector<TBYTE> vecVertices;
@@ -257,8 +258,71 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 		}
 	}
 
+	// Merge the submeshes into one triangle list
+	std::vector<TUINT16>    vecMergedIndices;
+	std::vector<SkinVertex> vecUnique;
+	{
+		std::vector<TUINT16> vecRawTris;
+		T2_FOREACH( vecSubMeshes, it )
+		{
+			GLint iIndexBufferSize = 0;
+			it->oVertexArray.GetIndexBuffer().GetParameter( GL_BUFFER_SIZE, iIndexBufferSize );
+
+			Toshi::T2DynamicVector<TBYTE> vecStrip;
+			vecStrip.SetSize( iIndexBufferSize );
+			it->oVertexArray.GetIndexBuffer().GetSubData( vecStrip.Begin(), 0, iIndexBufferSize );
+
+			const TUINT16* pStrip = TREINTERPRETCAST( const TUINT16*, &*vecStrip.Begin() );
+			const TUINT    uiNum  = iIndexBufferSize / sizeof( TUINT16 );
+
+			// Unroll the strip, honouring restart markers and dropping the
+			// degenerate triangles used to stitch strips
+			TUINT uiRunStart = 0;
+			for ( TUINT i = 0; i + 2 < uiNum; i++ )
+			{
+				const TUINT16 a = pStrip[ i ], b = pStrip[ i + 1 ], c = pStrip[ i + 2 ];
+
+				if ( a == 0xFFFF ) { uiRunStart = i + 1; continue; }
+				if ( b == 0xFFFF ) { uiRunStart = i + 2; continue; }
+				if ( c == 0xFFFF ) { uiRunStart = i + 3; continue; }
+				if ( a == b || b == c || a == c ) continue;
+
+				if ( ( ( i - uiRunStart ) & 1 ) == 0 ) { vecRawTris.push_back( a ); vecRawTris.push_back( b ); }
+				else                                   { vecRawTris.push_back( b ); vecRawTris.push_back( a ); }
+				vecRawTris.push_back( c );
+			}
+		}
+
+		std::unordered_map<std::string, TUINT16> mapUnique;
+		vecUnique.reserve( uiNumTotalVertices );
+		vecMergedIndices.reserve( vecRawTris.size() );
+
+		for ( TUINT16 uiIndex : vecRawTris )
+		{
+			std::string strKey( TREINTERPRETCAST( const char*, &pVertices[ uiIndex ] ), sizeof( SkinVertex ) );
+
+			auto    itUnique = mapUnique.find( strKey );
+			TUINT16 uiUnique;
+			if ( itUnique == mapUnique.end() )
+			{
+				uiUnique = TUINT16( vecUnique.size() );
+				mapUnique.emplace( std::move( strKey ), uiUnique );
+				vecUnique.push_back( pVertices[ uiIndex ] );
+			}
+			else
+			{
+				uiUnique = itUnique->second;
+			}
+
+			vecMergedIndices.push_back( uiUnique );
+		}
+	}
+
+	pVertices          = vecUnique.data();
+	uiNumTotalVertices = TUINT( vecUnique.size() );
+
 	// Insert data to the GLTF buffer
-	gltfBuffer.data.insert( gltfBuffer.data.end(), vecVertices.Begin(), vecVertices.End() );
+	gltfBuffer.data.insert( gltfBuffer.data.end(), TREINTERPRETCAST( const TBYTE*, vecUnique.data() ), TREINTERPRETCAST( const TBYTE*, vecUnique.data() + vecUnique.size() ) );
 
 	//-----------------------------------------------------------------------------
 	// 3. Vertex Buffer View
@@ -358,85 +422,51 @@ TBOOL SkinMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, Toshi::TSkeleto
 	a_rOutModel.accessors.push_back( std::move( gltfAccUV ) );
 	const TINT iAccUVIndex = TINT( a_rOutModel.accessors.size() - 1 );
 
-	T2_FOREACH( vecSubMeshes, it )
-	{
-		TSIZE uiBufferBaseOffset = gltfBuffer.data.size();
+	const TSIZE uiIndexOffset = gltfBuffer.data.size();
+	gltfBuffer.data.insert( gltfBuffer.data.end(), TREINTERPRETCAST( const TBYTE*, vecMergedIndices.data() ), TREINTERPRETCAST( const TBYTE*, vecMergedIndices.data() + vecMergedIndices.size() ) );
 
-		//-----------------------------------------------------------------------------
-		// 1. Index Buffer
-		//-----------------------------------------------------------------------------
-		GLint iIndexBufferSize = 0;
-		it->oVertexArray.GetIndexBuffer().GetParameter( GL_BUFFER_SIZE, iIndexBufferSize );
+	tinygltf::BufferView gltfBufferViewIndex;
+	gltfBufferViewIndex.buffer     = iBufferIndex;
+	gltfBufferViewIndex.byteOffset = uiIndexOffset;
+	gltfBufferViewIndex.byteLength = vecMergedIndices.size() * sizeof( TUINT16 );
+	gltfBufferViewIndex.target     = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
 
-		// Allocate array for the index data
-		Toshi::T2DynamicVector<TBYTE> vecIndices;
-		vecIndices.SetSize( iIndexBufferSize );
-		it->oVertexArray.GetIndexBuffer().GetSubData( vecIndices.Begin(), 0, iIndexBufferSize );
+	a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewIndex ) );
+	const TINT iIndexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
 
-		// Insert data to the GLTF buffer
-		gltfBuffer.data.insert( gltfBuffer.data.end(), vecIndices.Begin(), vecIndices.End() );
+	tinygltf::Accessor gltfAccIndex;
+	gltfAccIndex.bufferView    = iIndexBufferView;
+	gltfAccIndex.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+	gltfAccIndex.type          = TINYGLTF_TYPE_SCALAR;
+	gltfAccIndex.count         = vecMergedIndices.size();
 
-		//-----------------------------------------------------------------------------
-		// 2. Index Buffer View
-		//-----------------------------------------------------------------------------
-		tinygltf::BufferView gltfBufferViewIndex;
-		gltfBufferViewIndex.buffer = iBufferIndex;
-		gltfBufferViewIndex.byteOffset = uiBufferBaseOffset;
-		gltfBufferViewIndex.byteLength = iIndexBufferSize;
-		gltfBufferViewIndex.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
+	a_rOutModel.accessors.push_back( std::move( gltfAccIndex ) );
+	const TINT iAccIndicesIndex = TINT( a_rOutModel.accessors.size() - 1 );
 
-		a_rOutModel.bufferViews.push_back( std::move( gltfBufferViewIndex ) );
-		const TINT iIndexBufferView = TINT( a_rOutModel.bufferViews.size() - 1 );
+	tinygltf::Mesh      gltfMesh;
+	tinygltf::Primitive gltfPrimitive;
 
-		//-----------------------------------------------------------------------------
-		// 3. Accessors
-		//-----------------------------------------------------------------------------
+	gltfPrimitive.attributes[ "POSITION" ]   = iAccPositionIndex;
+	gltfPrimitive.attributes[ "NORMAL" ]     = iAccNormalIndex;
+	gltfPrimitive.attributes[ "WEIGHTS_0" ]  = iAccWeightsIndex;
+	gltfPrimitive.attributes[ "JOINTS_0" ]   = iAccJointsIndex;
+	gltfPrimitive.attributes[ "TEXCOORD_0" ] = iAccUVIndex;
+	gltfPrimitive.indices  = iAccIndicesIndex;
+	gltfPrimitive.mode     = TINYGLTF_MODE_TRIANGLES;
+	gltfPrimitive.material = iMaterialIndex;
 
-		// Indices
-		tinygltf::Accessor gltfAccIndex;
-		gltfAccIndex.bufferView = iIndexBufferView;
-		gltfAccIndex.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
-		gltfAccIndex.type = TINYGLTF_TYPE_SCALAR;
-		gltfAccIndex.count = it->uiNumIndices;
-
-		a_rOutModel.accessors.push_back( std::move( gltfAccIndex ) );
-		const TINT iAccIndicesIndex = TINT( a_rOutModel.accessors.size() - 1 );
-
-		//-----------------------------------------------------------------------------
-		// 4. Write mesh
-		//-----------------------------------------------------------------------------
-		tinygltf::Mesh gltfMesh;
-		tinygltf::Primitive gltfPrimitive;
-
-		gltfPrimitive.attributes[ "POSITION" ] = iAccPositionIndex;
-		gltfPrimitive.attributes[ "NORMAL" ] = iAccNormalIndex;
-		gltfPrimitive.attributes[ "WEIGHTS_0" ] = iAccWeightsIndex;
-		gltfPrimitive.attributes[ "JOINTS_0" ] = iAccJointsIndex;
-		gltfPrimitive.attributes[ "TEXCOORD_0" ] = iAccUVIndex;
-		gltfPrimitive.indices = iAccIndicesIndex;
-		gltfPrimitive.mode = TINYGLTF_MODE_TRIANGLE_STRIP;
-		gltfPrimitive.material = iMaterialIndex;
-
-		gltfMesh.primitives.push_back( std::move( gltfPrimitive ) );
-		a_rOutModel.meshes.push_back( std::move( gltfMesh ) );
-	}
+	gltfMesh.primitives.push_back( std::move( gltfPrimitive ) );
+	a_rOutModel.meshes.push_back( std::move( gltfMesh ) );
 
 	// Add the buffer for this mesh
 	a_rOutModel.buffers.push_back( std::move( gltfBuffer ) );
 
-	// Create nodes for each of the meshes
-	for ( TSIZE i = iMeshStartIndex; i < a_rOutModel.meshes.size(); i++ )
-	{
-		tinygltf::Node gltfNode;
-		gltfNode.mesh = i;
-		gltfNode.skin = 0;
+	tinygltf::Node gltfNode;
+	gltfNode.mesh = TINT( a_rOutModel.meshes.size() - 1 );
+	gltfNode.skin = 0;
+	gltfNode.name = GetName();
 
-		gltfNode.name = ( vecSubMeshes.Size() == 1 )
-			? GetName()
-			: TString8::VarArgs( "%s_SM%u", GetName(), i - iMeshStartIndex ).GetString();
-		
-		a_rOutModel.nodes.push_back( std::move( gltfNode ) );
-	}
+	a_rOutModel.nodes.push_back( std::move( gltfNode ) );
 
 	return TTRUE;
 }

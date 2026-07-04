@@ -6,6 +6,8 @@
 
 #include <ToshiTools/T2CommandLine.h>
 
+#include <deque>
+
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
 // Note: Should be the last include!
@@ -202,7 +204,10 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 					for ( auto pBone = pBones ? pBones->FirstChildElement( "Bone" ) : TNULL; pBone; pBone = pBone->NextSiblingElement( "Bone" ) )
 					{
 						const TCHAR* pchName = pBone->Attribute( "Name" );
-						if ( pchName ) oBoneFilter.PushBack( pchName );
+						if ( !pchName ) continue;
+
+						const TCHAR* pchGltfName = pBone->Attribute( "GltfName" );
+						oBoneFilter.PushBack( { pchGltfName ? pchGltfName : pchName, pchName } );
 					}
 				}
 
@@ -787,16 +792,41 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 					tinygltf::Model& rGDst    = *rPrimary.pGLTFModel;
 					tinygltf::Model& rGSrc    = *itDup->pGLTFModel;
 
-					// Union the skeletons: append any of the duplicate's bones that the
-					// primary lacks (as new joint nodes), so each model can later extract
-					// its own skeleton from the shared GLTF
+					// Deduplicate bones
+					std::map<std::string, std::string> mapBoneToGltf;
+
 					if ( !rGDst.skins.empty() && !rGSrc.skins.empty() && rGDst.skins[ 0 ].inverseBindMatrices >= 0 && rGSrc.skins[ 0 ].inverseBindMatrices >= 0 )
 					{
 						tinygltf::Skin& rSkinDst = rGDst.skins[ 0 ];
 						tinygltf::Skin& rSkinSrc = rGSrc.skins[ 0 ];
 
-						std::vector<std::string> vecPrimaryBones;
-						for ( int iJoint : rSkinDst.joints ) vecPrimaryBones.push_back( rGDst.nodes[ iJoint ].name );
+						auto fnBuildParents = []( const tinygltf::Model& rModel ) {
+							std::vector<int> vecParent( rModel.nodes.size(), -1 );
+							for ( int p = 0; p < int( rModel.nodes.size() ); p++ )
+								for ( int c : rModel.nodes[ p ].children )
+									if ( c >= 0 && c < int( vecParent.size() ) ) vecParent[ c ] = p;
+							return vecParent;
+						};
+
+						auto fnTransformKey = []( const tinygltf::Node& rNode ) -> std::string {
+							auto fnAt = []( const std::vector<double>& v, TSIZE i, double def ) { return v.size() > i ? v[ i ] : def; };
+							TCHAR szBuf[ 160 ];
+							snprintf( szBuf, sizeof( szBuf ), "%.4f,%.4f,%.4f|%.5f,%.5f,%.5f,%.5f",
+							    fnAt( rNode.translation, 0, 0.0 ), fnAt( rNode.translation, 1, 0.0 ), fnAt( rNode.translation, 2, 0.0 ),
+							    fnAt( rNode.rotation, 0, 0.0 ), fnAt( rNode.rotation, 1, 0.0 ), fnAt( rNode.rotation, 2, 0.0 ), fnAt( rNode.rotation, 3, 1.0 ) );
+							return szBuf;
+						};
+
+						const std::vector<int> vecDstParent = fnBuildParents( rGDst );
+						const std::vector<int> vecSrcParent = fnBuildParents( rGSrc );
+
+						std::map<std::string, std::deque<std::string>> mapPrimaryStruct;
+						for ( int iJoint : rSkinDst.joints )
+						{
+							const int   iParent   = vecDstParent[ iJoint ];
+							std::string strParent = ( iParent >= 0 ) ? rGDst.nodes[ iParent ].name : std::string();
+							mapPrimaryStruct[ strParent + "#" + fnTransformKey( rGDst.nodes[ iJoint ] ) ].push_back( rGDst.nodes[ iJoint ].name );
+						}
 
 						// Reads MAT4 (64-byte) elements from an inverse-bind-matrix accessor
 						auto fnAppendMatrices = []( std::vector<TBYTE>& rOut, const tinygltf::Model& rModel, TINT iAcc, TINT iStart, TINT iCount ) {
@@ -817,8 +847,26 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 						{
 							const int             iSrcJoint = rSkinSrc.joints[ js ];
 							const tinygltf::Node& rSrcNode  = rGSrc.nodes[ iSrcJoint ];
-							if ( std::find( vecPrimaryBones.begin(), vecPrimaryBones.end(), rSrcNode.name ) != vecPrimaryBones.end() ) continue;
 
+							const int   iSrcParent      = vecSrcParent[ iSrcJoint ];
+							std::string strParentMapped = ( iSrcParent >= 0 ) ? rGSrc.nodes[ iSrcParent ].name : std::string();
+							if ( !strParentMapped.empty() )
+							{
+								auto itParent = mapBoneToGltf.find( strParentMapped );
+								if ( itParent != mapBoneToGltf.end() ) strParentMapped = itParent->second;
+							}
+
+							const std::string strKey    = strParentMapped + "#" + fnTransformKey( rSrcNode );
+							auto              itStruct  = mapPrimaryStruct.find( strKey );
+							if ( itStruct != mapPrimaryStruct.end() && !itStruct->second.empty() )
+							{
+								// Same bone under a different name - reuse the primary's node
+								mapBoneToGltf[ rSrcNode.name ] = itStruct->second.front();
+								itStruct->second.pop_front();
+								continue;
+							}
+
+							// Found a new bone
 							tinygltf::Node oNode;
 							oNode.name        = rSrcNode.name;
 							oNode.translation = rSrcNode.translation;
@@ -829,16 +877,10 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 							rSkinDst.joints.push_back( iNewNode );
 							fnAppendMatrices( vecIBM, rGSrc, rSkinSrc.inverseBindMatrices, TINT( js ), 1 );
 
-							// Parent it under the same bone as in the source (matched by name)
-							for ( const auto& rSrcParent : rGSrc.nodes )
-							{
-								if ( std::find( rSrcParent.children.begin(), rSrcParent.children.end(), iSrcJoint ) == rSrcParent.children.end() ) continue;
+							const int iDstParent = strParentMapped.empty() ? -1 : fnFindNodeByName( rGDst, strParentMapped );
+							if ( iDstParent >= 0 ) rGDst.nodes[ iDstParent ].children.push_back( iNewNode );
 
-								const int iDstParent = fnFindNodeByName( rGDst, rSrcParent.name );
-								if ( iDstParent >= 0 ) rGDst.nodes[ iDstParent ].children.push_back( iNewNode );
-								break;
-							}
-
+							mapBoneToGltf[ rSrcNode.name ] = rSrcNode.name;
 							bAppended = TTRUE;
 						}
 
@@ -909,7 +951,11 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 							}
 							for ( const auto& rChSrc : rSrcAnim.channels )
 							{
-								const TINT iNode = fnFindNodeByName( rGDst, rGSrc.nodes[ rChSrc.target_node ].name );
+								const std::string& strSrcNode = rGSrc.nodes[ rChSrc.target_node ].name;
+								auto               itBone     = mapBoneToGltf.find( strSrcNode );
+								const std::string& strDstNode = ( itBone != mapBoneToGltf.end() ) ? itBone->second : strSrcNode;
+
+								const TINT iNode = fnFindNodeByName( rGDst, strDstNode );
 								if ( iNode < 0 ) continue;
 
 								tinygltf::AnimationChannel oChannel = rChSrc;
@@ -933,6 +979,18 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 						auto itMap = mapSeqToGltf.find( pSeqElem->Attribute( "Name" ) );
 						if ( itMap != mapSeqToGltf.end() && itMap->second != pSeqElem->Attribute( "Name" ) )
 							pSeqElem->SetAttribute( "GltfName", itMap->second.c_str() );
+					}
+
+					// Point each bone at its shared GLTF node when the merge renamed it
+					auto pBonesRoot = pTMDL->FirstChildElement( "TSkeleton" )->FirstChildElement( "Bones" );
+					for ( auto pBoneElem = pBonesRoot ? pBonesRoot->FirstChildElement( "Bone" ) : TNULL; pBoneElem; pBoneElem = pBoneElem->NextSiblingElement( "Bone" ) )
+					{
+						const TCHAR* pchBoneName = pBoneElem->Attribute( "Name" );
+						if ( !pchBoneName ) continue;
+
+						auto itMap = mapBoneToGltf.find( pchBoneName );
+						if ( itMap != mapBoneToGltf.end() && itMap->second != pchBoneName )
+							pBoneElem->SetAttribute( "GltfName", itMap->second.c_str() );
 					}
 
 					// The duplicate's GLTF is fully consumed now; free it to keep memory

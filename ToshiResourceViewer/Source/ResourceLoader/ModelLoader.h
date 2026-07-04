@@ -130,7 +130,7 @@ void ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder );
 using AnimationFilter = Toshi::T2DynamicVector<Toshi::T2Pair<Toshi::TString8, Toshi::TString8>>;
 void ModelLoader_SetAnimationFilter( const AnimationFilter* pFilter );
 
-using BoneFilter = Toshi::T2DynamicVector<Toshi::TString8>;
+using BoneFilter = Toshi::T2DynamicVector<Toshi::T2Pair<Toshi::TString8, Toshi::TString8>>;
 void ModelLoader_SetBoneFilter( const BoneFilter* pFilter );
 
 }

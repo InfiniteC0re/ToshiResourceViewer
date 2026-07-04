@@ -334,21 +334,28 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 		// Select the joints to compile. With a bone filter (merged models sharing a
 		// GLTF) only the model's own bones are kept, otherwise all of them
-		T2DynamicVector<TINT> vecIncludedJoints; // indices into pGLTFSkin->joints
+		T2DynamicVector<TINT>     vecIncludedJoints; // indices into pGLTFSkin->joints
+		T2DynamicVector<TString8> vecBoneNames;      // compiled name per included joint
 		for ( TSIZE j = 0; j < pGLTFSkin->joints.size(); j++ )
 		{
+			const std::string& strJointName = gltfModel.nodes[ pGLTFSkin->joints[ j ] ].name;
+			TString8           strBoneName  = strJointName.c_str();
+
 			if ( s_pBoneFilter )
 			{
-				const std::string& strJointName = gltfModel.nodes[ pGLTFSkin->joints[ j ] ].name;
-
 				TBOOL bAllowed = TFALSE;
 				for ( TINT f = 0; !bAllowed && f < s_pBoneFilter->Size(); f++ )
-					bAllowed = ( ( *s_pBoneFilter )[ f ].CompareNoCase( strJointName.c_str() ) == 0 );
+				{
+					if ( ( *s_pBoneFilter )[ f ].first.CompareNoCase( strJointName.c_str() ) != 0 ) continue;
+					bAllowed    = TTRUE;
+					strBoneName = ( *s_pBoneFilter )[ f ].second;
+				}
 
 				if ( !bAllowed ) continue;
 			}
 
 			vecIncludedJoints.PushBack( TINT( j ) );
+			vecBoneNames.PushBack( strBoneName );
 		}
 
 		const TINT iNumBones = vecIncludedJoints.Size();
@@ -370,15 +377,15 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		TSkeletonBone* pBones       = pModel->pSkeleton->m_pBones;
 		for ( TINT i = 0; i < iNumBones; i++ )
 		{
-			auto  gltfBoneIdx = pGLTFSkin->joints[ vecIncludedJoints[ i ] ];
-			auto& gltfBone    = gltfModel.nodes[ gltfBoneIdx ];
-			auto& strBoneName = gltfBone.name;
+			auto             gltfBoneIdx = pGLTFSkin->joints[ vecIncludedJoints[ i ] ];
+			auto&            gltfBone    = gltfModel.nodes[ gltfBoneIdx ];
+			const TString8&  strBoneName = vecBoneNames[ i ];
 
-			TINFO( "Bone %d: %s\n", i, strBoneName.c_str() );
+			TINFO( "Bone %d: %s\n", i, strBoneName.GetString() );
 
 			// Copy name
-			T2String8::Copy( pBones[ i ].m_szName, strBoneName.c_str(), sizeof( pBones[ i ].m_szName ) - 1 );
-			pBones[ i ].m_iNameLength = TUINT8( TMath::Min( strBoneName.size(), sizeof( pBones[ i ].m_szName ) - 1 ) );
+			T2String8::Copy( pBones[ i ].m_szName, strBoneName.GetString(), sizeof( pBones[ i ].m_szName ) - 1 );
+			pBones[ i ].m_iNameLength = TUINT8( TMath::Min<TSIZE>( strBoneName.Length(), sizeof( pBones[ i ].m_szName ) - 1 ) );
 
 			// Setup transform (local to parent)
 			// Later will need to update it to be world transform
@@ -462,9 +469,6 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		TKLBuilder  oTKLBuilder;
 		const TBOOL bGlobalTKLBuilder = s_pTKLBuilder != TNULL;
 		TKLBuilder* pTKLBuilder       = bGlobalTKLBuilder ? s_pTKLBuilder : &oTKLBuilder;
-		const TINT  iTBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetTranslations().Size() : 0;
-		const TINT  iQBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetRotations().Size() : 0;
-		const TINT  iSBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetScales().Size() : 0;
 
 		pModel->pSkeleton->m_SkeletonSequences = new TSkeletonSequence[ iNumSeq ];
 		TSkeletonSequence* pSeqs               = pModel->pSkeleton->m_SkeletonSequences;
@@ -596,14 +600,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 								TASSERT( pKeyFrame->iRotation == -1 );
 								TQuaternion& quatRotation = *(TQuaternion*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
 
-								pKeyFrame->iRotation = pTKLBuilder->AddRotation( quatRotation, iQBaseIndex ) - iQBaseIndex;
+								pKeyFrame->iRotation = pTKLBuilder->AddRotation( quatRotation );
 							}
 							else if ( bIsTranslation )
 							{
 								TASSERT( pKeyFrame->iTranslation == -1 );
 								TVector3& vPosition = *(TVector3*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
 
-								pKeyFrame->iTranslation = pTKLBuilder->AddTranslation( vPosition, iTBaseIndex ) - iTBaseIndex;
+								pKeyFrame->iTranslation = pTKLBuilder->AddTranslation( vPosition );
 							}
 						}
 					}
@@ -647,12 +651,12 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			T2String8::Copy( pModel->oSkeletonHeader.m_szTKLName, strTKLName.GetString(), sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 );
 		}
 
-		pModel->oSkeletonHeader.m_iTKeyCount  = pTKLBuilder->GetTranslations().Size() - iTBaseIndex;
-		pModel->oSkeletonHeader.m_iQKeyCount  = pTKLBuilder->GetRotations().Size() - iQBaseIndex;
-		pModel->oSkeletonHeader.m_iSKeyCount  = pTKLBuilder->GetScales().Size() - iSBaseIndex;
-		pModel->oSkeletonHeader.m_iTBaseIndex = iTBaseIndex;
-		pModel->oSkeletonHeader.m_iQBaseIndex = iQBaseIndex;
-		pModel->oSkeletonHeader.m_iSBaseIndex = iSBaseIndex;
+		pModel->oSkeletonHeader.m_iTKeyCount  = pTKLBuilder->GetTranslations().Size();
+		pModel->oSkeletonHeader.m_iQKeyCount  = pTKLBuilder->GetRotations().Size();
+		pModel->oSkeletonHeader.m_iSKeyCount  = pTKLBuilder->GetScales().Size();
+		pModel->oSkeletonHeader.m_iTBaseIndex = 0;
+		pModel->oSkeletonHeader.m_iQBaseIndex = 0;
+		pModel->oSkeletonHeader.m_iSBaseIndex = 0;
 
 		// Sequence bone keyframes reference the TKL with 16-bit indices, so a model
 		// can hold at most 0x10000 keys. Without compression a large model exceeds
@@ -800,13 +804,11 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 			tinygltf::Skin* pGLTFSkin = ( bHasSkins ) ? &gltfModel.skins[ 0 ] : TNULL;
 
-			// Handle submeshes
-			TINT iPreviousAccPositionIndex = -1;
+			// Generate submeshes to fit the 28 bones limit
 			for ( TINT k = 0; k < vecSubMeshes.Size(); k++ )
 			{
 				auto& gltfSubMesh          = gltfModel.meshes[ vecSubMeshes[ k ] ];
 				auto& gltfSubMeshPrimitive = gltfSubMesh.primitives[ 0 ];
-				auto  pSubMesh             = &pMesh->vecSubMeshes.PushBack();
 
 				TASSERT( gltfSubMesh.primitives.size() == 1 );
 
@@ -822,9 +824,6 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				const TINT iAccWeightsIndex  = gltfSubMeshPrimitive.attributes[ "WEIGHTS_0" ];
 				const TINT iAccJointsIndex   = gltfSubMeshPrimitive.attributes[ "JOINTS_0" ];
 				const TINT iAccUVIndex       = gltfSubMeshPrimitive.attributes[ "TEXCOORD_0" ];
-
-				const TBOOL bSharedVertexPool = iPreviousAccPositionIndex == iAccPositionIndex;
-				iPreviousAccPositionIndex     = iAccPositionIndex;
 
 				auto& gltfIndexAccessor    = gltfModel.accessors[ iAccIndicesIndex ];
 				auto& gltfPositionAccessor = gltfModel.accessors[ iAccPositionIndex ];
@@ -847,238 +846,245 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				auto& gltfJointsBuffer   = gltfModel.buffers[ gltfJointsBufferView.buffer ];
 				auto& gltfUVBuffer       = gltfModel.buffers[ gltfUVBufferView.buffer ];
 
-				TASSERT( gltfIndexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT );
-				TASSERT( gltfIndexAccessor.type == TINYGLTF_TYPE_SCALAR );
+				TASSERT( gltfIndexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT && gltfIndexAccessor.type == TINYGLTF_TYPE_SCALAR );
+				TASSERT( gltfPositionAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && gltfPositionAccessor.type == TINYGLTF_TYPE_VEC3 );
+				TASSERT( gltfNormalAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && gltfNormalAccessor.type == TINYGLTF_TYPE_VEC3 );
+				TASSERT( ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT || gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ) && gltfWeightsAccessor.type == TINYGLTF_TYPE_VEC4 );
+				TASSERT( gltfJointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE && gltfJointsAccessor.type == TINYGLTF_TYPE_VEC4 );
+				TASSERT( gltfUVAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && gltfUVAccessor.type == TINYGLTF_TYPE_VEC2 );
 
-				const TUINT uiStartVertex = vecVertices.Size();
+				const TBYTE* pGltfDataIndex    = &*( gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset );
+				const TBYTE* pGltfDataPosition = &*( gltfPositionBuffer.data.begin() + gltfPositionBufferView.byteOffset );
+				const TBYTE* pGltfDataNormal   = &*( gltfNormalBuffer.data.begin() + gltfNormalBufferView.byteOffset );
+				const TBYTE* pGltfDataWeights  = &*( gltfWeightsBuffer.data.begin() + gltfWeightsBufferView.byteOffset );
+				const TBYTE* pGltfDataJoints   = &*( gltfJointsBuffer.data.begin() + gltfJointsBufferView.byteOffset );
+				const TBYTE* pGltfDataUV       = &*( gltfUVBuffer.data.begin() + gltfUVBufferView.byteOffset );
 
-				// Setup indices
-				const TUINT              uiNumIndicesOrig = gltfIndexAccessor.count;
-				T2DynamicVector<TUINT16> vecIndices;
-				vecIndices.SetSize( uiNumIndicesOrig );
+				const TUINT uiIndexStride    = gltfIndexBufferView.byteStride ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
+				const TUINT uiPositionStride = gltfPositionBufferView.byteStride ? gltfPositionBufferView.byteStride : sizeof( TVector3 );
+				const TUINT uiNormalStride   = gltfNormalBufferView.byteStride ? gltfNormalBufferView.byteStride : sizeof( TVector3 );
+				const TUINT uiWeightsStride  = gltfWeightsBufferView.byteStride ? gltfWeightsBufferView.byteStride : ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ? sizeof( TVector4 ) : sizeof( TUINT32 ) );
+				const TUINT uiJointsStride   = gltfJointsBufferView.byteStride ? gltfJointsBufferView.byteStride : sizeof( TUINT32 );
+				const TUINT uiUVStride       = gltfUVBufferView.byteStride ? gltfUVBufferView.byteStride : sizeof( TVector2 );
 
-				auto        pGltfDataIndex      = gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset;
-				const TUINT uiIndexBufferStride = ( gltfIndexBufferView.byteStride != 0 ) ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
-				const TBOOL bIsTriangleStrip    = gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLE_STRIP;
+				auto fnReadIndex = [ & ]( TUINT j ) -> TUINT16 {
+					return *(const TUINT16*)( pGltfDataIndex + uiIndexStride * j + gltfIndexAccessor.byteOffset );
+				};
 
-				// Copy indices
-				for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+				// Read the primitive as a triangle list, unrolling triangle strips
+				// (restart markers, winding, degenerate stitch triangles)
+				std::vector<TUINT16> vecTris;
+				if ( gltfSubMeshPrimitive.mode == TINYGLTF_MODE_TRIANGLE_STRIP )
 				{
-					TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
-
-					if ( bSharedVertexPool )
+					TUINT uiRunStart = 0;
+					for ( TUINT j = 0; j + 2 < gltfIndexAccessor.count; j++ )
 					{
-						// Using a shared vertex pool, so just copy the index
-						vecIndices[ j ] = uiIndex;
+						const TUINT16 a = fnReadIndex( j ), b = fnReadIndex( j + 1 ), c = fnReadIndex( j + 2 );
+						if ( a == 0xFFFF ) { uiRunStart = j + 1; continue; }
+						if ( b == 0xFFFF ) { uiRunStart = j + 2; continue; }
+						if ( c == 0xFFFF ) { uiRunStart = j + 3; continue; }
+						if ( a == b || b == c || a == c ) continue;
+
+						const TBOOL bEven = ( ( j - uiRunStart ) & 1 ) == 0;
+						vecTris.push_back( bEven ? a : b );
+						vecTris.push_back( bEven ? b : a );
+						vecTris.push_back( c );
+					}
+				}
+				else
+				{
+					for ( TUINT j = 0; j + 2 < gltfIndexAccessor.count; j += 3 )
+					{
+						const TUINT16 a = fnReadIndex( j ), b = fnReadIndex( j + 1 ), c = fnReadIndex( j + 2 );
+						if ( a == b || b == c || a == c ) continue;
+						vecTris.push_back( a );
+						vecTris.push_back( b );
+						vecTris.push_back( c );
+					}
+				}
+
+				const TSIZE uiTriCount = vecTris.size() / 3;
+
+				// Resolve skeleton bones
+				auto fnJointToBone = [ & ]( TUINT8 uiJointSlot ) -> TINT {
+					if ( !pGLTFSkin ) return 0;
+					auto it = mapGltfBoneToTRVBone.Find( pGLTFSkin->joints[ uiJointSlot ] );
+					return ( it != mapGltfBoneToTRVBone.End() ) ? it->second : 0;
+				};
+
+				auto fnReadWeights = [ & ]( TUINT16 m, TFLOAT aflWeights[ 4 ] ) {
+					if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT )
+					{
+						const TFLOAT* p = (const TFLOAT*)( pGltfDataWeights + uiWeightsStride * m + gltfWeightsAccessor.byteOffset );
+						for ( TINT s = 0; s < 4; s++ ) aflWeights[ s ] = p[ s ];
 					}
 					else
 					{
-						// Not using shared pool, need to increase index by the last vertex id
-						if ( !bIsTriangleStrip || uiIndex != 0xFFFF ) vecIndices[ j ] = uiIndex + uiStartVertex;
-						else vecIndices[ j ] = 0xFFFF;
+						const TUINT8* p = (const TUINT8*)( pGltfDataWeights + uiWeightsStride * m + gltfWeightsAccessor.byteOffset );
+						for ( TINT s = 0; s < 4; s++ ) aflWeights[ s ] = p[ s ] / 255.0f;
 					}
-				}
+				};
 
-				// Count vertices
-				T2RedBlackTree<TUINT16> treeUsedVertices;
-				for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+				auto fnVertexBones = [ & ]( TUINT16 m, TINT aiBones[ 4 ], TBOOL abAnimated[ 4 ], TFLOAT aflWeights[ 4 ] ) {
+					const TUINT8* pJoints = (const TUINT8*)( pGltfDataJoints + uiJointsStride * m + gltfJointsAccessor.byteOffset );
+					fnReadWeights( m, aflWeights );
+					for ( TINT s = 0; s < 4; s++ )
+					{
+						aiBones[ s ]    = fnJointToBone( pJoints[ s ] );
+						abAnimated[ s ] = aflWeights[ s ] >= ( 1.0f / 255.0f ) && pJoints[ s ];
+					}
+				};
+
+				// Builds one submesh from a set of triangles that fit the bone limit,
+				// duplicating shared vertices so each submesh owns its own vertices
+				auto fnBuildSubMesh = [ & ]( const std::vector<TUINT>& rTriangles ) {
+					auto        pSubMesh      = &pMesh->vecSubMeshes.PushBack();
+					const TUINT uiStartVertex = vecVertices.Size();
+
+					T2Map<TUINT16, TUINT16> mapGlobalToLocal;
+					T2Map<TINT, TINT>       mapUsedBones;
+					std::vector<TUINT16>    vecLocalIndices;
+					vecLocalIndices.reserve( rTriangles.size() * 3 );
+
+					for ( TUINT uiTri : rTriangles )
+					{
+						for ( TINT c = 0; c < 3; c++ )
+						{
+							const TUINT16 m     = vecTris[ uiTri * 3 + c ];
+							auto          itMap = mapGlobalToLocal.Find( m );
+
+							if ( itMap != mapGlobalToLocal.End() )
+							{
+								vecLocalIndices.push_back( TUINT16( uiStartVertex + itMap->second ) );
+								continue;
+							}
+
+							const TUINT16 uiLocal = TUINT16( mapGlobalToLocal.Size() );
+
+							SkinMesh::SkinVertex vtx;
+							vtx.Position = *(const TVector3*)( pGltfDataPosition + uiPositionStride * m + gltfPositionAccessor.byteOffset );
+							vtx.Normal   = *(const TVector3*)( pGltfDataNormal + uiNormalStride * m + gltfNormalAccessor.byteOffset );
+							vtx.UV       = *(const TVector2*)( pGltfDataUV + uiUVStride * m + gltfUVAccessor.byteOffset );
+
+							TINT   aiBones[ 4 ];
+							TBOOL  abAnim[ 4 ];
+							TFLOAT aflWeights[ 4 ];
+							fnVertexBones( m, aiBones, abAnim, aflWeights );
+
+							for ( TINT s = 0; s < 4; s++ )
+							{
+								if ( abAnim[ s ] && mapUsedBones.Find( aiBones[ s ] ) == mapUsedBones.End() )
+								{
+									pSubMesh->aBones[ mapUsedBones.Size() ] = aiBones[ s ];
+									mapUsedBones.Insert( aiBones[ s ], mapUsedBones.Size() );
+								}
+							}
+
+							const TBOOL bNoBoneAnimated = !abAnim[ 0 ] && !abAnim[ 1 ] && !abAnim[ 2 ] && !abAnim[ 3 ];
+
+							for ( TINT s = 0; s < 4; s++ )
+								vtx.Bones[ s ] = abAnim[ s ] ? ( mapUsedBones[ aiBones[ s ] ]->second * 3 ) : 0;
+
+							TUINT8 auiWeights[ 4 ];
+							for ( TINT s = 0; s < 4; s++ ) auiWeights[ s ] = TUINT8( TMath::Round( aflWeights[ s ] * 255.0f ) );
+
+							// Normalize the byte weights so they sum to 255
+							TUINT16 uiWeightsSum = auiWeights[ 0 ] + auiWeights[ 1 ] + auiWeights[ 2 ] + auiWeights[ 3 ];
+							if ( uiWeightsSum != 255 && uiWeightsSum != 0 )
+							{
+								TUINT8* pMax = &auiWeights[ 0 ];
+								for ( TINT s = 1; s < 4; s++ ) if ( *pMax < auiWeights[ s ] ) pMax = &auiWeights[ s ];
+
+								if ( uiWeightsSum > 255 ) *pMax = *pMax - ( uiWeightsSum - 255 );
+								else                      *pMax = *pMax + ( 255 - uiWeightsSum );
+							}
+
+							vtx.Weights[ 0 ] = abAnim[ 0 ] ? auiWeights[ 0 ] : ( bNoBoneAnimated ? 255 : 0 );
+							vtx.Weights[ 1 ] = abAnim[ 1 ] ? auiWeights[ 1 ] : 0;
+							vtx.Weights[ 2 ] = abAnim[ 2 ] ? auiWeights[ 2 ] : 0;
+							vtx.Weights[ 3 ] = abAnim[ 3 ] ? auiWeights[ 3 ] : 0;
+
+							mapGlobalToLocal.Insert( m, uiLocal );
+							vecVertices.PushBack( vtx );
+							vecLocalIndices.push_back( TUINT16( uiStartVertex + uiLocal ) );
+						}
+					}
+
+					TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Bone-palette split failed" );
+
+					// The engine draws triangle strips, so stripify the group
+					PrimitiveGroup* pPrims    = TNULL;
+					TUINT16         iNumPrims = 0;
+					TBOOL           bResult   = GenerateStrips( vecLocalIndices.data(), TUINT( vecLocalIndices.size() ), &pPrims, &iNumPrims );
+					TASSERT( bResult == TTRUE && iNumPrims == 1 );
+
+					pSubMesh->uiNumIndices  = pPrims->numIndices;
+					pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pPrims->indices, pPrims->numIndices, GL_STATIC_DRAW );
+					pSubMesh->uiEndVertexId = vecVertices.Size();
+					pSubMesh->uiNumBones    = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size();
+
+					delete[] pPrims;
+
+					pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
+					pSubMesh->oVertexArray.Bind();
+					pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Position ) );
+					pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Normal ) );
+					pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Weights ), GL_TRUE );
+					pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Bones ), GL_TRUE );
+					pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 4, 2, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, UV ) );
+				};
+
+				// Greedily pack triangles into submeshes within the bone limit
+				std::vector<TUINT> vecGroup;
+				std::vector<TINT>  vecGroupBones;
+
+				auto fnFlushGroup = [ & ]() {
+					if ( vecGroup.empty() ) return;
+					fnBuildSubMesh( vecGroup );
+					vecGroup.clear();
+					vecGroupBones.clear();
+				};
+
+				for ( TSIZE t = 0; t < uiTriCount; t++ )
 				{
-					TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
-					if ( bIsTriangleStrip && uiIndex == 0xFFFF ) continue;
+					TINT aiTriBones[ 12 ];
+					TINT iNumTriBones = 0;
 
-					if ( treeUsedVertices.Find( uiIndex ) == treeUsedVertices.End() ) treeUsedVertices.Insert( uiIndex );
-				}
+					for ( TINT c = 0; c < 3; c++ )
+					{
+						TINT   aiBones[ 4 ];
+						TBOOL  abAnim[ 4 ];
+						TFLOAT aflWeights[ 4 ];
+						fnVertexBones( vecTris[ t * 3 + c ], aiBones, abAnim, aflWeights );
 
-				// Setup vertices
-				const TUINT uiNumVerticesOrig = treeUsedVertices.Size();
-				vecVertices.SetSize( uiStartVertex + uiNumVerticesOrig );
+						for ( TINT s = 0; s < 4; s++ )
+						{
+							if ( !abAnim[ s ] ) continue;
 
-				TASSERT( gltfPositionAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-				TASSERT( gltfPositionAccessor.type == TINYGLTF_TYPE_VEC3 );
-				auto        pGltfDataPosition      = gltfPositionBuffer.data.begin() + gltfPositionBufferView.byteOffset;
-				const TUINT uiPositionBufferStride = ( gltfPositionBufferView.byteStride != 0 ) ? gltfPositionBufferView.byteStride : sizeof( TVector3 );
+							TBOOL bSeen = TFALSE;
+							for ( TINT b = 0; b < iNumTriBones; b++ ) if ( aiTriBones[ b ] == aiBones[ s ] ) { bSeen = TTRUE; break; }
+							if ( !bSeen ) aiTriBones[ iNumTriBones++ ] = aiBones[ s ];
+						}
+					}
 
-				TASSERT( gltfNormalAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-				TASSERT( gltfNormalAccessor.type == TINYGLTF_TYPE_VEC3 );
-				auto        pGltfDataNormal      = gltfNormalBuffer.data.begin() + gltfNormalBufferView.byteOffset;
-				const TUINT uiNormalBufferStride = ( gltfNormalBufferView.byteStride != 0 ) ? gltfNormalBufferView.byteStride : sizeof( TVector3 );
-
-				TASSERT( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT || gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
-				TASSERT( gltfWeightsAccessor.type == TINYGLTF_TYPE_VEC4 );
-				auto        pGltfDataWeights      = gltfWeightsBuffer.data.begin() + gltfWeightsBufferView.byteOffset;
-				const TUINT uiWeightsBufferStride = ( gltfWeightsBufferView.byteStride != 0 ) ? gltfWeightsBufferView.byteStride : ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ? sizeof( TVector4 ) : sizeof( TUINT32 ) );
-
-				TASSERT( gltfJointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
-				TASSERT( gltfJointsAccessor.type == TINYGLTF_TYPE_VEC4 );
-				auto        pGltfDataJoints      = gltfJointsBuffer.data.begin() + gltfJointsBufferView.byteOffset;
-				const TUINT uiJointsBufferStride = ( gltfJointsBufferView.byteStride != 0 ) ? gltfJointsBufferView.byteStride : sizeof( TUINT32 );
-
-				TASSERT( gltfUVAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-				TASSERT( gltfUVAccessor.type == TINYGLTF_TYPE_VEC2 );
-				auto        pGltfDataUV      = gltfUVBuffer.data.begin() + gltfUVBufferView.byteOffset;
-				const TUINT uiUVBufferStride = ( gltfUVBufferView.byteStride != 0 ) ? gltfUVBufferView.byteStride : sizeof( TVector2 );
-
-				// Build vertices
-				TUINT             j = uiStartVertex;
-				T2Map<TINT, TINT> mapUsedBones;
-				T2_FOREACH( treeUsedVertices, itVertex )
-				{
-					TUINT16 m = *itVertex;
-
-					vecVertices[ j ].Position = *(TVector3*)( &*( pGltfDataPosition + ( uiPositionBufferStride * m ) + gltfPositionAccessor.byteOffset ) );
-					vecVertices[ j ].Normal   = *(TVector3*)( &*( pGltfDataNormal + ( uiNormalBufferStride * m ) + gltfNormalAccessor.byteOffset ) );
-					vecVertices[ j ].UV       = *(TVector2*)( &*( pGltfDataUV + ( uiUVBufferStride * m ) + gltfUVAccessor.byteOffset ) );
-
-					TUINT8* pJoints = (TUINT8*)( &*( pGltfDataJoints + ( uiJointsBufferStride * m ) + gltfJointsAccessor.byteOffset ) );
-
-					// Filtered-out bones never carry weights, so map them to bone 0
-					auto fnJointToBone = [ & ]( TUINT8 uiJointSlot ) -> TINT {
-						if ( !pGLTFSkin ) return 0;
-						auto it = mapGltfBoneToTRVBone.Find( pGLTFSkin->joints[ uiJointSlot ] );
-						return ( it != mapGltfBoneToTRVBone.End() ) ? it->second : 0;
+					// How many of this triangle's bones are new to the group?
+					auto fnBoneInGroup = [ & ]( TINT iBone ) -> TBOOL {
+						for ( TINT g : vecGroupBones ) if ( g == iBone ) return TTRUE;
+						return TFALSE;
 					};
 
-					TINT iBoneIndex1 = fnJointToBone( pJoints[ 0 ] );
-					TINT iBoneIndex2 = fnJointToBone( pJoints[ 1 ] );
-					TINT iBoneIndex3 = fnJointToBone( pJoints[ 2 ] );
-					TINT iBoneIndex4 = fnJointToBone( pJoints[ 3 ] );
+					TINT iNewBones = 0;
+					for ( TINT b = 0; b < iNumTriBones; b++ ) if ( !fnBoneInGroup( aiTriBones[ b ] ) ) iNewBones++;
 
-					// Read weights
-					TFLOAT flWeight1, flWeight2, flWeight3, flWeight4;
-					if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT )
-					{
-						// Read weights as floats
-						TFLOAT* pWeights = (TFLOAT*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
+					if ( !vecGroup.empty() && TINT( vecGroupBones.size() ) + iNewBones > SKINNED_SUBMESH_MAX_BONES )
+						fnFlushGroup();
 
-						flWeight1 = pWeights[ 0 ];
-						flWeight2 = pWeights[ 1 ];
-						flWeight3 = pWeights[ 2 ];
-						flWeight4 = pWeights[ 3 ];
-					}
-					else if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE )
-					{
-						// Read weights as TUINT8 bytes
-						TUINT8* pWeights = (TUINT8*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
+					for ( TINT b = 0; b < iNumTriBones; b++ ) if ( !fnBoneInGroup( aiTriBones[ b ] ) ) vecGroupBones.push_back( aiTriBones[ b ] );
 
-						flWeight1 = pWeights[ 0 ] / 255.0f;
-						flWeight2 = pWeights[ 1 ] / 255.0f;
-						flWeight3 = pWeights[ 2 ] / 255.0f;
-						flWeight4 = pWeights[ 3 ] / 255.0f;
-					}
-
-					const TBOOL bHasSpaceForBones = mapUsedBones.Size() < SKINNED_SUBMESH_MAX_BONES;
-					const TBOOL bBoneAnimated1    = flWeight1 >= ( 1.0f / 255.0f ) && pJoints[ 0 ];
-					const TBOOL bBoneAnimated2    = flWeight2 >= ( 1.0f / 255.0f ) && pJoints[ 1 ];
-					const TBOOL bBoneAnimated3    = flWeight3 >= ( 1.0f / 255.0f ) && pJoints[ 2 ];
-					const TBOOL bBoneAnimated4    = flWeight4 >= ( 1.0f / 255.0f ) && pJoints[ 3 ];
-
-					if ( bHasSpaceForBones && bBoneAnimated1 && mapUsedBones.Find( iBoneIndex1 ) == mapUsedBones.End() )
-					{
-						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex1;
-						mapUsedBones.Insert( iBoneIndex1, mapUsedBones.Size() );
-					}
-
-					if ( bHasSpaceForBones && bBoneAnimated2 && mapUsedBones.Find( iBoneIndex2 ) == mapUsedBones.End() )
-					{
-						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex2;
-						mapUsedBones.Insert( iBoneIndex2, mapUsedBones.Size() );
-					}
-
-					if ( bHasSpaceForBones && bBoneAnimated3 && mapUsedBones.Find( iBoneIndex3 ) == mapUsedBones.End() )
-					{
-						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex3;
-						mapUsedBones.Insert( iBoneIndex3, mapUsedBones.Size() );
-					}
-
-					if ( bHasSpaceForBones && bBoneAnimated4 && mapUsedBones.Find( iBoneIndex4 ) == mapUsedBones.End() )
-					{
-						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex4;
-						mapUsedBones.Insert( iBoneIndex4, mapUsedBones.Size() );
-					}
-
-					TBOOL bNoBoneAnimated = !bBoneAnimated1 && !bBoneAnimated2 && !bBoneAnimated3 && !bBoneAnimated4;
-
-					vecVertices[ j ].Bones[ 0 ] = bBoneAnimated1 ? ( mapUsedBones[ iBoneIndex1 ]->second * 3 ) : 0;
-					vecVertices[ j ].Bones[ 1 ] = bBoneAnimated2 ? ( mapUsedBones[ iBoneIndex2 ]->second * 3 ) : 0;
-					vecVertices[ j ].Bones[ 2 ] = bBoneAnimated3 ? ( mapUsedBones[ iBoneIndex3 ]->second * 3 ) : 0;
-					vecVertices[ j ].Bones[ 3 ] = bBoneAnimated4 ? ( mapUsedBones[ iBoneIndex4 ]->second * 3 ) : 0;
-
-					TUINT8 uiWeight1 = TUINT8( TMath::Round( flWeight1 * 255.0f ) );
-					TUINT8 uiWeight2 = TUINT8( TMath::Round( flWeight2 * 255.0f ) );
-					TUINT8 uiWeight3 = TUINT8( TMath::Round( flWeight3 * 255.0f ) );
-					TUINT8 uiWeight4 = TUINT8( TMath::Round( flWeight4 * 255.0f ) );
-
-					// Normalize weights
-					TUINT16 uiWeightsSum = uiWeight1 + uiWeight2 + uiWeight3 + uiWeight4;
-					if ( uiWeightsSum != 255 )
-					{
-						TUINT8* pMax = &uiWeight1;
-
-						if ( *pMax < uiWeight2 ) pMax = &uiWeight2;
-						if ( *pMax < uiWeight3 ) pMax = &uiWeight3;
-						if ( *pMax < uiWeight4 ) pMax = &uiWeight4;
-
-						// TODO: distribute across all?
-						if ( uiWeightsSum > 255 )
-							*pMax = *pMax - ( uiWeightsSum - 255 );
-						else
-							*pMax = *pMax + ( 255 - uiWeightsSum );
-					}
-
-					vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? uiWeight1 : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
-					vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? uiWeight2 : 0;
-					vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? uiWeight3 : 0;
-					vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? uiWeight4 : 0;
-
-					j += 1;
+					vecGroup.push_back( TUINT( t ) );
 				}
 
-				// Need to manually delete all elements
-				treeUsedVertices.DeleteAll();
-
-				TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Too many bones per mesh (> 28) - split the mesh in your editing tool!!!" );
-
-				T2VertexArray::Unbind();
-
-				// Setup submesh data
-				PrimitiveGroup* pPrims       = NULL;
-				TUINT16*        pIndices     = vecIndices.Begin();
-				TUINT           uiNumIndices = vecIndices.Size();
-
-				if ( gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES )
-				{
-					//SetListsOnly( TTRUE );
-
-					// Generate triangle strips
-					TUINT16 iNumPrims;
-					TBOOL   bResult = GenerateStrips( &vecIndices[ 0 ], vecIndices.Size(), &pPrims, &iNumPrims );
-					TASSERT( bResult == TTRUE );
-					TASSERT( iNumPrims == 1 );
-					vecIndices.FreeMemory();
-
-					pIndices     = pPrims->indices;
-					uiNumIndices = pPrims->numIndices;
-				}
-
-				pSubMesh->uiNumIndices  = uiNumIndices;
-				pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pIndices, uiNumIndices, GL_STATIC_DRAW );
-				pSubMesh->uiEndVertexId = uiStartVertex + uiNumVerticesOrig;
-				pSubMesh->uiNumBones    = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size(); // prevent meshes that don't use bones from disappearing
-
-				// Clean NvTriStrip's object
-				if ( pPrims )
-				{
-					delete[] pPrims;
-					pPrims = TNULL;
-				}
-
-				pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
-				pSubMesh->oVertexArray.Bind();
-				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Position ) );
-				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Normal ) );
-				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Weights ), GL_TRUE );
-				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Bones ), GL_TRUE );
-				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 4, 2, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, UV ) );
+				fnFlushGroup();
 			}
 
 			TASSERT( pMesh->vecSubMeshes.Size() > 0 );
