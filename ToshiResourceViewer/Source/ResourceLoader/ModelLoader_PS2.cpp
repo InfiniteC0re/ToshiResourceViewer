@@ -43,6 +43,18 @@ static void ModelLoader_LoadCollision_Barnyard_PS2( PTRB* pTRB, ResourceLoader::
 		rOutCollisionMesh.iBoneID       = rCollisionMesh.m_iBoneID;
 		rOutCollisionMesh.uiNumVertices = rCollisionMesh.m_uiNumVertices;
 		rOutCollisionMesh.uiNumIndices  = rCollisionMesh.m_uiNumIndices;
+		rOutCollisionMesh.vecVertices.SetSize( rCollisionMesh.m_uiNumVertices );
+		rOutCollisionMesh.vecIndices.SetSize( rCollisionMesh.m_uiNumIndices );
+
+		for ( TUINT k = 0; k < rCollisionMesh.m_uiNumVertices; k++ )
+		{
+			rOutCollisionMesh.vecVertices[ k ] = rCollisionMesh.m_pVertices[ k ];
+		}
+
+		for ( TUINT k = 0; k < rCollisionMesh.m_uiNumIndices; k++ )
+		{
+			rOutCollisionMesh.vecIndices[ k ] = rCollisionMesh.m_pIndices[ k ];
+		}
 
 		for ( TUINT k = 0; k < rCollisionMesh.m_uiNumCollTypes; k++ )
 		{
@@ -299,7 +311,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_PS
 	pModel->eModelType         = ModelType::Skin;
 	pModel->pTRB               = pTRB;
 	pModel->iLODCount          = pPS2Header->m_iNumLODs;
-	pModel->aLODDistances[ 0 ] = pPS2Header->m_fLODDistance;
+	pModel->fRenderDistance    = pPS2Header->m_fLODDistance;
 	pModel->bAnimationsLoaded  = TFALSE;
 	pModel->pSkeleton          = TNULL;
 

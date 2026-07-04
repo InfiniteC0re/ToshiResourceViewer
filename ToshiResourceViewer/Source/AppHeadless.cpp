@@ -37,175 +37,199 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 	if ( g_pCmd->HasParameter( "-compile" ) )
 	{
-		const TBOOL bCompileList = g_pCmd->HasParameter( "-list" );
-		const TBOOL bCompileAll  = g_pCmd->HasParameter( "-all" );
+		const TBOOL bCompileList  = g_pCmd->HasParameter( "-list" );
+		const TBOOL bCompileAll   = g_pCmd->HasParameter( "-all" );
 		TString8    strTKLNameArg = g_pCmd->GetParameterValue( "-tkl" );
 
 		struct CompileInput
 		{
-			TString8                strFilePath;
-			TString8                strXMLFilePath;
+			TString8               strFilePath;
+			TString8               strXMLFilePath;
 			tinyxml2::XMLDocument* pXML;
-			TBOOL                   bCanCompile;
+			TBOOL                  bCanCompile;
 		};
 
-		auto fnCompile = [ & ]( const TString8& strCompileInputPath, TBOOL bCompileList ) {
+		auto fnReadCompileList = []( const TString8& strCompileInputPath, T2DynamicVector<TString8>& rOutInputs ) {
 			TString8   strCompileInputFileDir;
 			const TINT iCompileLastSlashIndex = strCompileInputPath.FindReverse( '\\' );
 			strCompileInputFileDir.Copy( strCompileInputPath, iCompileLastSlashIndex + 1 );
 
-			TString8 strCompileInputFileName      = ( iCompileLastSlashIndex != -1 ) ? TString8( strCompileInputPath.GetString( iCompileLastSlashIndex + 1 ) ) : strCompileInputPath;
-			TString8 strCompileInputFileNameNoExt = strCompileInputFileName.Mid( 0, strCompileInputFileName.FindReverse( '.' ) );
-			TString8 strTKLName                   = strTKLNameArg;
-
-			T2DynamicVector<CompileInput> vecInputFiles;
-
-		auto fnAddCompileInput = [ &vecInputFiles ]( const TString8& strFilePath ) {
-			TString8 strInputFilePath = strFilePath;
-
-			if ( !strInputFilePath.EndsWithNoCase( ".gltf" ) && !strInputFilePath.EndsWithNoCase( ".xml" ) )
-				strInputFilePath += ".xml";
-
-			CompileInput& rInput = vecInputFiles.PushBack();
-			rInput.strFilePath   = strInputFilePath;
-			rInput.pXML          = TNULL;
-			rInput.bCanCompile   = TTRUE;
-
-			if ( strInputFilePath.EndsWithNoCase( ".xml" ) )
-			{
-				rInput.pXML = new tinyxml2::XMLDocument;
-
-				if ( rInput.pXML->LoadFile( strInputFilePath.GetString() ) != tinyxml2::XML_SUCCESS )
-				{
-					TERROR( "Failed to read model XML: %s\n", strInputFilePath.GetString() );
-					delete rInput.pXML;
-					rInput.pXML = TNULL;
-					rInput.bCanCompile = TFALSE;
-					return;
-				}
-
-				rInput.strXMLFilePath = strInputFilePath;
-
-				auto pTMDLElem = rInput.pXML->FirstChildElement( "TMDL" );
-				if ( pTMDLElem && pTMDLElem->Attribute( "Source" ) )
-					rInput.strFilePath = pTMDLElem->Attribute( "Source" );
-
-				if ( pTMDLElem && pTMDLElem->Attribute( "Type" ) && T2String8::CompareNoCase( pTMDLElem->Attribute( "Type" ), "Skin" ) != 0 )
-				{
-					TERROR( "Cannot compile %s: model type '%s' is not supported yet\n", strInputFilePath.GetString(), pTMDLElem->Attribute( "Type" ) );
-					rInput.bCanCompile = TFALSE;
-				}
-			}
-		};
-
-		if ( bCompileList )
-		{
-			// Read compile list file
 			TFile* pFile = TFile::Create( strCompileInputPath );
 			if ( !pFile ) return;
 
 			TSIZE  uiFileSize = pFile->GetSize();
 			TCHAR* pBuffer    = new TCHAR[ uiFileSize + 1 ];
+			TCHAR* pCursor    = pBuffer;
 			TCHAR* pBufferEnd = pBuffer + uiFileSize;
 			pFile->Read( pBuffer, uiFileSize );
 			pBuffer[ uiFileSize ] = '\0';
 
-			// Parse the file content
 			T2FormatString512 oFmtStr;
-
-			while ( pBuffer < pBufferEnd )
+			while ( pCursor < pBufferEnd )
 			{
-				pBuffer += oFmtStr.ParseLine( pBuffer );
+				pCursor += oFmtStr.ParseLine( pCursor );
 
 				if ( oFmtStr.Length() > 0 )
+					rOutInputs.PushBack() = TString8::VarArgs( "%s\\%s", strCompileInputFileDir.GetString(), oFmtStr.Get() );
+			}
+
+			delete[] pBuffer;
+			pFile->Destroy();
+		};
+
+		auto fnGetXMLKeyLibrary = []( const TString8& strFilePath ) -> TString8 {
+			TString8 strXMLFilePath = strFilePath;
+			if ( !strXMLFilePath.EndsWithNoCase( ".xml" ) )
+				strXMLFilePath += ".xml";
+
+			tinyxml2::XMLDocument oXML;
+			if ( oXML.LoadFile( strXMLFilePath.GetString() ) != tinyxml2::XML_SUCCESS )
+				return TString8();
+
+			auto pTMDLElem     = oXML.FirstChildElement( "TMDL" );
+			auto pSkeletonElem = pTMDLElem ? pTMDLElem->FirstChildElement( "TSkeleton" ) : TNULL;
+			auto pSeqElem      = pSkeletonElem ? pSkeletonElem->FirstChildElement( "Sequences" ) : TNULL;
+			if ( !pSeqElem || !pSeqElem->Attribute( "KeyLibrary" ) ) return TString8();
+
+			return pSeqElem->Attribute( "KeyLibrary" );
+		};
+
+		auto fnCompileInputs = [ & ]( T2DynamicVector<TString8>& rCompileInputPaths, const TString8& strFallbackName, TBOOL bUseSourceNames ) {
+			TString8 strTKLName = strTKLNameArg;
+
+			T2DynamicVector<CompileInput> vecInputFiles;
+
+			auto fnAddCompileInput = [ &vecInputFiles ]( const TString8& strFilePath ) {
+				TString8 strInputFilePath = strFilePath;
+
+				if ( !strInputFilePath.EndsWithNoCase( ".gltf" ) && !strInputFilePath.EndsWithNoCase( ".xml" ) )
+					strInputFilePath += ".xml";
+
+				CompileInput& rInput = vecInputFiles.PushBack();
+				rInput.strFilePath   = strInputFilePath;
+				rInput.pXML          = TNULL;
+				rInput.bCanCompile   = TTRUE;
+
+				if ( strInputFilePath.EndsWithNoCase( ".xml" ) )
 				{
-					fnAddCompileInput( TString8::VarArgs( "%s\\%s", strCompileInputFileDir.GetString(), oFmtStr.Get() ) );
+					rInput.pXML = new tinyxml2::XMLDocument;
+
+					if ( rInput.pXML->LoadFile( strInputFilePath.GetString() ) != tinyxml2::XML_SUCCESS )
+					{
+						TERROR( "Failed to read model XML: %s\n", strInputFilePath.GetString() );
+						delete rInput.pXML;
+						rInput.pXML        = TNULL;
+						rInput.bCanCompile = TFALSE;
+						return;
+					}
+
+					rInput.strXMLFilePath = strInputFilePath;
+
+					auto pTMDLElem = rInput.pXML->FirstChildElement( "TMDL" );
+					if ( pTMDLElem && pTMDLElem->Attribute( "Source" ) )
+						rInput.strFilePath = pTMDLElem->Attribute( "Source" );
+
+					if ( pTMDLElem && pTMDLElem->Attribute( "Type" ) && T2String8::CompareNoCase( pTMDLElem->Attribute( "Type" ), "Skin" ) != 0 )
+					{
+						TERROR( "Cannot compile %s: model type '%s' is not supported yet\n", strInputFilePath.GetString(), pTMDLElem->Attribute( "Type" ) );
+						rInput.bCanCompile = TFALSE;
+					}
+				}
+			};
+
+			T2_FOREACH( rCompileInputPaths, itCompileInputPath )
+			fnAddCompileInput( *itCompileInputPath );
+
+			if ( !strTKLName )
+			{
+				T2_FOREACH( vecInputFiles, itInput )
+				{
+					if ( !itInput->bCanCompile ) continue;
+					if ( !itInput->pXML ) continue;
+
+					auto pTMDLElem     = itInput->pXML->FirstChildElement( "TMDL" );
+					auto pSkeletonElem = pTMDLElem ? pTMDLElem->FirstChildElement( "TSkeleton" ) : TNULL;
+					auto pSeqElem      = pSkeletonElem ? pSkeletonElem->FirstChildElement( "Sequences" ) : TNULL;
+					if ( !pSeqElem ) continue;
+
+					strTKLName = pSeqElem->Attribute( "KeyLibrary" );
+					if ( strTKLName ) break;
 				}
 			}
 
-			pFile->Destroy();
-		}
-		else
-		{
-			fnAddCompileInput( strCompileInputPath );
-		}
+			if ( !strTKLName ) strTKLName = strFallbackName;
 
-		if ( !strTKLName )
-		{
+			// Set TKL builder so that all models will share single TKL
+			TKLBuilder oTKLBuilder;
+			oTKLBuilder.SetName( strTKLName.GetString() );
+			ResourceLoader::ModelLoader_SetTKLBuilder( &oTKLBuilder );
+
+			T2DynamicVector<ModelResourceView*> vecModelViews;
+
 			T2_FOREACH( vecInputFiles, itInput )
 			{
 				if ( !itInput->bCanCompile ) continue;
-				if ( !itInput->pXML ) continue;
 
-				auto pTMDLElem     = itInput->pXML->FirstChildElement( "TMDL" );
-				auto pSkeletonElem = pTMDLElem ? pTMDLElem->FirstChildElement( "TSkeleton" ) : TNULL;
-				auto pSeqElem      = pSkeletonElem ? pSkeletonElem->FirstChildElement( "Sequences" ) : TNULL;
-				if ( !pSeqElem ) continue;
-				
-				strTKLName = pSeqElem->Attribute( "KeyLibrary" );
-				if ( strTKLName ) break;
+				ModelResourceView* pModelResView = new ModelResourceView();
+				pModelResView->CreateExternal( itInput->strFilePath.GetString() );
+
+				if ( itInput->pXML )
+					pModelResView->DeserializeModelInformation( itInput->pXML );
+
+				pModelResView->SetAutoSaveTKL( TFALSE ); // will save it later
+
+				vecModelViews.PushBack( pModelResView );
 			}
-		}
 
-		if ( !strTKLName ) strTKLName = strCompileInputFileNameNoExt;
+			// Complete the keylib with builder's data
+			Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( oTKLBuilder.GetName() ) )->Create( oTKLBuilder );
 
-		// Set TKL builder so that all models will share single TKL
-		TKLBuilder oTKLBuilder;
-		oTKLBuilder.SetName( strTKLName.GetString() );
-		ResourceLoader::ModelLoader_SetTKLBuilder( &oTKLBuilder );
-
-		T2DynamicVector<ModelResourceView*> vecModelViews;
-
-		T2_FOREACH( vecInputFiles, itInput )
-		{
-			if ( !itInput->bCanCompile ) continue;
-
-			ModelResourceView* pModelResView = new ModelResourceView();
-			pModelResView->CreateExternal( itInput->strFilePath.GetString() );
-
-			if ( itInput->pXML )
-				pModelResView->DeserializeModelInformation( itInput->pXML );
-
-			pModelResView->SetAutoSaveTKL( TFALSE ); // will save it later
-
-			vecModelViews.PushBack( pModelResView );
-		}
-
-		// Complete the keylib with builder's data
-		Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( oTKLBuilder.GetName() ) )->Create( oTKLBuilder );
-
-		// Flush all models to disk
-		T2_FOREACH( vecModelViews, it )
-		{
-			ModelResourceView* pModelResView = *it;
-
-			// Prepare trb for model output
-			PTRB oOutModel;
-			oOutModel.GetSections()->CreateStream();
-			pModelResView->OnSave( &oOutModel );
-
-			TString8 strModelName = bCompileList ? pModelResView->GetFileName().Mid( 0, pModelResView->GetFileName().FindReverse( '.' ) ) : g_pCmd->GetParameterValue( "-name", strCompileInputFileNameNoExt );
-			oOutModel.WriteToFile( TString8::VarArgs( "%s\\%s.trb", strOutputPath.GetString(), strModelName.GetString() ).GetString(), bCompress );
-
-			if ( it.Index() + 1 == vecModelViews.Size() )
+			// Flush all models to disk
+			T2_FOREACH( vecModelViews, it )
 			{
-				// Prepare trb for keylib output
-				PTRB oOutKeylib;
-				oOutKeylib.GetSections()->CreateStream();
-				pModelResView->OnSaveTKL( &oOutKeylib );
+				ModelResourceView* pModelResView = *it;
 
-				oOutKeylib.WriteToFile( TString8::VarArgs( "%s\\%s.tkl", strOutputPath.GetString(), strTKLName.GetString() ).GetString(), bCompress );
+				// Prepare trb for model output
+				PTRB oOutModel;
+				oOutModel.GetSections()->CreateStream();
+				pModelResView->OnSave( &oOutModel );
+
+				TString8 strModelName = bUseSourceNames ? pModelResView->GetFileName().Mid( 0, pModelResView->GetFileName().FindReverse( '.' ) ) : g_pCmd->GetParameterValue( "-name", strFallbackName );
+				oOutModel.WriteToFile( TString8::VarArgs( "%s\\%s.trb", strOutputPath.GetString(), strModelName.GetString() ).GetString(), bCompress );
+
+				if ( it.Index() + 1 == vecModelViews.Size() )
+				{
+					// Prepare trb for keylib output
+					PTRB oOutKeylib;
+					oOutKeylib.GetSections()->CreateStream();
+					pModelResView->OnSaveTKL( &oOutKeylib );
+
+					oOutKeylib.WriteToFile( TString8::VarArgs( "%s\\%s.tkl", strOutputPath.GetString(), strTKLName.GetString() ).GetString(), bCompress );
+				}
+
+				delete *it;
 			}
 
-			delete *it;
-		}
+			T2_FOREACH( vecInputFiles, itInput )
+			{
+				delete itInput->pXML;
+			}
 
-		T2_FOREACH( vecInputFiles, itInput )
-		{
-			delete itInput->pXML;
-		}
+			vecModelViews.Clear();
+		};
 
-		vecModelViews.Clear();
+		auto fnCompile = [ & ]( const TString8& strCompileInputPath, TBOOL bCompileList ) {
+			const TINT iCompileLastSlashIndex       = strCompileInputPath.FindReverse( '\\' );
+			TString8   strCompileInputFileName      = ( iCompileLastSlashIndex != -1 ) ? TString8( strCompileInputPath.GetString( iCompileLastSlashIndex + 1 ) ) : strCompileInputPath;
+			TString8   strCompileInputFileNameNoExt = strCompileInputFileName.Mid( 0, strCompileInputFileName.FindReverse( '.' ) );
+
+			T2DynamicVector<TString8> vecCompileInputPaths;
+			if ( bCompileList )
+				fnReadCompileList( strCompileInputPath, vecCompileInputPaths );
+			else
+				vecCompileInputPaths.PushBack() = strCompileInputPath;
+
+			fnCompileInputs( vecCompileInputPaths, strCompileInputFileNameNoExt, bCompileList );
 		};
 
 		if ( bCompileAll )
@@ -243,15 +267,15 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 		DecompiledModel* pModelCursor = TNULL;
 		auto             fnMoveCursor = [ & ]() {
-            pModelCursor = &vecDecompiled.PushBack();
+			pModelCursor = &vecDecompiled.PushBack();
 
-            pModelCursor->pGLTFModel = new tinygltf::Model;
-            pModelCursor->pXML       = new tinyxml2::XMLDocument;
-            pModelCursor->bValid     = TFALSE;
-            pModelCursor->bMerged    = TFALSE;
+			pModelCursor->pGLTFModel = new tinygltf::Model;
+			pModelCursor->pXML       = new tinyxml2::XMLDocument;
+			pModelCursor->bValid     = TFALSE;
+			pModelCursor->bMerged    = TFALSE;
 
-            pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewDeclaration() );
-            pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewComment( "Decompiled with Toshi Resource Viewer" ) );
+			pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewDeclaration() );
+			pModelCursor->pXML->InsertEndChild( pModelCursor->pXML->NewComment( "Decompiled with Toshi Resource Viewer" ) );
 		};
 
 		tinygltf::TinyGLTF gltfWriter;
@@ -326,7 +350,7 @@ void HeadlessMain( TINT argc, TCHAR** argv )
 
 			if ( bModels && ( oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "FileHeader" ) || oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "Database" ) ) )
 				return ResourceType::Model;
-			
+
 			if ( bMatlibs && ( oInTRB.GetSymbols()->Find<void*>( oInTRB.GetSections(), "TTL" ) ) )
 				return ResourceType::Matlib;
 

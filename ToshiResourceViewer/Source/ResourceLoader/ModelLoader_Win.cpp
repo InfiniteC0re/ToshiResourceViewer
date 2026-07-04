@@ -46,6 +46,20 @@ static void ModelLoader_LoadCollision_Barnyard( PTRB* pTRB, ResourceLoader::Mode
 		rOutCollisionMesh.iBoneID       = iBoneID;
 		rOutCollisionMesh.uiNumVertices = uiNumVertices;
 		rOutCollisionMesh.uiNumIndices  = uiNumIndices;
+		rOutCollisionMesh.vecVertices.SetSize( uiNumVertices );
+		rOutCollisionMesh.vecIndices.SetSize( uiNumIndices );
+
+		for ( TUINT k = 0; k < uiNumVertices; k++ )
+		{
+			rOutCollisionMesh.vecVertices[ k ].x = pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].x );
+			rOutCollisionMesh.vecVertices[ k ].y = pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].y );
+			rOutCollisionMesh.vecVertices[ k ].z = pTRB->ConvertEndianess( rCollisionMesh.m_pVertices[ k ].z );
+		}
+
+		for ( TUINT k = 0; k < uiNumIndices; k++ )
+		{
+			rOutCollisionMesh.vecIndices[ k ] = pTRB->ConvertEndianess( rCollisionMesh.m_pIndices[ k ] );
+		}
 
 		const TUINT uiNumCollTypes = pTRB->ConvertEndianess( rCollisionMesh.m_uiNumCollTypes );
 		for ( TUINT k = 0; k < uiNumCollTypes; k++ )
@@ -371,7 +385,7 @@ T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_Load_Barnyard_Windows( 
 
 	pModel->pTRB               = pTRB;
 	pModel->iLODCount          = pTRB->ConvertEndianess( pHeader->m_iNumLODs );
-	pModel->aLODDistances[ 0 ] = pTRB->ConvertEndianess( pHeader->m_fLODDistance );
+	pModel->fRenderDistance    = pTRB->ConvertEndianess( pHeader->m_fLODDistance );
 	pModel->bAnimationsLoaded  = TFALSE;
 
 	if ( pSkeleton )

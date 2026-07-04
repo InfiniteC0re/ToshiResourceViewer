@@ -13,6 +13,7 @@ IncludeDir.glm = "%%{wks.location}/OpenToshi/Toshi/Vendor/glm/include"
 IncludeDir.glew = "%{wks.location}/OpenToshi/Toshi/Vendor/glew/include"
 IncludeDir.sdl2 = "%{wks.location}/OpenToshi/Toshi/Vendor/sdl2/include"
 IncludeDir.toshi = "%{wks.location}/OpenToshi/Toshi/Source"
+IncludeDir.opcode = "%{wks.location}/OpenToshi/Toshi/Vendor/Opcode/Source"
 IncludeDir.imgui = "%{wks.location}/ThirdParty/ImGui"
 IncludeDir.assimp = "%{wks.location}/ToshiResourceViewer/Vendor/assimp/include"
 

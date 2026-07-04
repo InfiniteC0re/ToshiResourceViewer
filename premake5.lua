@@ -30,7 +30,10 @@ workspace "ToshiResourceViewer"
 		"STB_DXT_IMPLEMENTATION",
 		"STB_IMAGE_RESIZE_IMPLEMENTATION",
 		"USE_ATOMIC",
-		
+
+		"BAN_OPCODE_AUTOLINK",
+		"ICE_NO_DLL",
+
 		"NOMINMAX"
 	--	"TOSHI_PROFILER",
 	--	"TOSHI_PROFILER_MEMORY",
@@ -86,3 +89,4 @@ group "Main"
 	
 group "ThirdParty"
 	include "ThirdParty/ImGui"
+	include "OpenToshi/Toshi/Vendor/Opcode"

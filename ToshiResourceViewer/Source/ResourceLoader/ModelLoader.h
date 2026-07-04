@@ -81,6 +81,8 @@ public:
 		TINT                                       iBoneID       = -1;
 		TUINT                                      uiNumVertices = 0;
 		TUINT                                      uiNumIndices  = 0;
+		Toshi::T2DynamicVector<Toshi::TVector3>    vecVertices;
+		Toshi::T2DynamicVector<TUINT16>            vecIndices;
 		Toshi::T2DynamicVector<CollisionGroupInfo> vecGroups;
 	};
 
@@ -93,6 +95,7 @@ public:
 	TBOOL                                        bAnimationsLoaded;
 
 	TINT             iLODCount;
+	TFLOAT           fRenderDistance;
 	Toshi::TModelLOD aLODs[ 5 ];
 	TFLOAT           aLODDistances[ 5 ];
 

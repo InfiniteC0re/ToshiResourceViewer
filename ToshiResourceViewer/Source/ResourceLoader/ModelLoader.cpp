@@ -18,6 +18,7 @@
 #include <Platform/GL/T2GLTexture_GL.h>
 
 #include <tiny_gltf.h>
+#include <cstdio>
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -29,6 +30,205 @@ TOSHI_NAMESPACE_USING
 
 // Specify builder to compile models with common key library
 static TKLBuilder* s_pTKLBuilder = TNULL;
+
+static void ModelLoader_InitLODDistances( TFLOAT* a_pLODDistances )
+{
+	a_pLODDistances[ 0 ] = 5.0f;
+	a_pLODDistances[ 1 ] = 20.0f;
+	a_pLODDistances[ 2 ] = a_pLODDistances[ 1 ] + a_pLODDistances[ 1 ];
+	a_pLODDistances[ 3 ] = a_pLODDistances[ 2 ] + a_pLODDistances[ 2 ];
+	a_pLODDistances[ 4 ] = a_pLODDistances[ 3 ] + a_pLODDistances[ 3 ];
+}
+
+static TINT ModelLoader_ParseGLTFMeshLOD( const TCHAR* pchName )
+{
+	TINT iLODIndex = -1;
+
+	if ( std::sscanf( pchName, "LOD%d", &iLODIndex ) == 1 && iLODIndex >= 0 && iLODIndex < 5 )
+		return iLODIndex;
+
+	return -1;
+}
+
+// Ritter's approximate bounding sphere, used when the XML doesn't provide one
+static Toshi::TSphere ModelLoader_ComputeBoundingSphere( const Toshi::T2DynamicVector<Toshi::TVector3>& rvecPoints )
+{
+	if ( rvecPoints.IsEmpty() )
+		return TSphere( 0.0f, 0.0f, 0.0f, 0.0f );
+
+	auto fnFarthest = []( const Toshi::T2DynamicVector<TVector3>& rPts, const TVector3& rFrom ) -> TVector3 {
+		TINT   iBest  = 0;
+		TFLOAT flBest = -1.0f;
+		for ( TINT i = 0; i < rPts.Size(); i++ )
+		{
+			const TFLOAT d = TVector3::DistanceSq( rPts[ i ], rFrom );
+			if ( d > flBest ) { flBest = d; iBest = i; }
+		}
+		return rPts[ iBest ];
+	};
+
+	// Seed with the two most distant points, then grow to fit the rest
+	const TVector3 vecX = fnFarthest( rvecPoints, rvecPoints[ 0 ] );
+	const TVector3 vecY = fnFarthest( rvecPoints, vecX );
+
+	TVector3 vecCenter( ( vecX.x + vecY.x ) * 0.5f, ( vecX.y + vecY.y ) * 0.5f, ( vecX.z + vecY.z ) * 0.5f );
+	TFLOAT   flRadius = TVector3::Distance( vecY, vecCenter );
+
+	for ( TINT i = 0; i < rvecPoints.Size(); i++ )
+	{
+		const TFLOAT flDist = TVector3::Distance( rvecPoints[ i ], vecCenter );
+		if ( flDist > flRadius )
+		{
+			const TFLOAT   flMove = ( flDist - flRadius ) / ( 2.0f * flDist );
+			const TVector3 vecDir = rvecPoints[ i ] - vecCenter;
+			vecCenter = TVector3( vecCenter.x + vecDir.x * flMove, vecCenter.y + vecDir.y * flMove, vecCenter.z + vecDir.z * flMove );
+			flRadius  = ( flRadius + flDist ) * 0.5f;
+		}
+	}
+
+	return TSphere( vecCenter, flRadius );
+}
+
+static void ModelLoader_MarkGLTFCollisionMeshes( const tinygltf::Model& gltfModel, TINT iNodeIndex, T2DynamicVector<TBOOL>& vecCollisionMeshes )
+{
+	if ( iNodeIndex < 0 || iNodeIndex >= TINT( gltfModel.nodes.size() ) ) return;
+
+	auto& gltfNode = gltfModel.nodes[ iNodeIndex ];
+	if ( gltfNode.mesh >= 0 && gltfNode.mesh < TINT( vecCollisionMeshes.Size() ) )
+		vecCollisionMeshes[ gltfNode.mesh ] = TTRUE;
+
+	for ( TSIZE i = 0; i < gltfNode.children.size(); i++ )
+		ModelLoader_MarkGLTFCollisionMeshes( gltfModel, gltfNode.children[ i ], vecCollisionMeshes );
+}
+
+static TUINT16 ModelLoader_ReadGLTFIndex( const tinygltf::Buffer& gltfBuffer, const tinygltf::BufferView& gltfBufferView, const tinygltf::Accessor& gltfAccessor, TUINT iIndex )
+{
+	const TUINT uiStride = ( gltfBufferView.byteStride != 0 ) ? gltfBufferView.byteStride : tinygltf::GetComponentSizeInBytes( gltfAccessor.componentType );
+	const TBYTE* pData   = gltfBuffer.data.data() + gltfBufferView.byteOffset + gltfAccessor.byteOffset + ( uiStride * iIndex );
+
+	switch ( gltfAccessor.componentType )
+	{
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+			return *TREINTERPRETCAST( const TUINT8*, pData );
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+			return *TREINTERPRETCAST( const TUINT16*, pData );
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+			return TUINT16( *TREINTERPRETCAST( const TUINT32*, pData ) );
+		default:
+			TASSERT( TFALSE && "Unsupported collision index format" );
+			return 0;
+	}
+}
+
+static const TCHAR* ModelLoader_GetGLTFCollisionName( const tinygltf::Model& gltfModel, const tinygltf::Node* pNode, const tinygltf::Mesh& gltfMesh )
+{
+	if ( pNode && !pNode->name.empty() && pNode->name != "Collision" )
+		return pNode->name.c_str();
+
+	if ( !gltfMesh.name.empty() )
+		return gltfMesh.name.c_str();
+
+	if ( !gltfMesh.primitives.empty() )
+	{
+		const TINT iMaterial = gltfMesh.primitives[ 0 ].material;
+		if ( iMaterial >= 0 && iMaterial < TINT( gltfModel.materials.size() ) )
+		{
+			const std::string& strMaterialName = gltfModel.materials[ iMaterial ].name;
+			if ( strMaterialName.rfind( "Collision_", 0 ) == 0 )
+				return strMaterialName.c_str() + 10;
+		}
+	}
+
+	return "default";
+}
+
+static TBOOL ModelLoader_IsGLTFCollisionMeshValid( const tinygltf::Mesh& gltfMesh )
+{
+	if ( gltfMesh.primitives.size() != 1 ) return TFALSE;
+
+	auto& gltfPrimitive = gltfMesh.primitives[ 0 ];
+	return gltfPrimitive.indices >= 0 &&
+	    gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES &&
+	    gltfPrimitive.attributes.contains( "POSITION" );
+}
+
+static void ModelLoader_LoadGLTFCollisionMeshes( const tinygltf::Model& gltfModel, ResourceLoader::Model* pModel, T2DynamicVector<TBOOL>& vecCollisionMeshes )
+{
+	T2DynamicVector<TINT> vecCollisionNodes;
+	vecCollisionNodes.SetSize( gltfModel.meshes.size() );
+
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+		vecCollisionNodes[ i ] = -1;
+
+	for ( TSIZE i = 0; i < gltfModel.nodes.size(); i++ )
+	{
+		auto& gltfNode = gltfModel.nodes[ i ];
+		if ( gltfNode.mesh >= 0 && gltfNode.mesh < TINT( gltfModel.meshes.size() ) && vecCollisionMeshes[ gltfNode.mesh ] )
+			vecCollisionNodes[ gltfNode.mesh ] = TINT( i );
+	}
+
+	TINT iNumCollisionMeshes = 0;
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		if ( vecCollisionMeshes[ i ] && ModelLoader_IsGLTFCollisionMeshValid( gltfModel.meshes[ i ] ) )
+			iNumCollisionMeshes += 1;
+	}
+
+	if ( iNumCollisionMeshes == 0 ) return;
+
+	pModel->iNumCollisionMeshes = iNumCollisionMeshes;
+	pModel->pCollisionMeshes    = new ResourceLoader::Model::CollisionMeshInfo[ iNumCollisionMeshes ];
+
+	TINT iOutCollisionMesh = 0;
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		if ( !vecCollisionMeshes[ i ] ) continue;
+
+		auto& gltfMesh = gltfModel.meshes[ i ];
+		if ( !ModelLoader_IsGLTFCollisionMeshValid( gltfMesh ) ) continue;
+
+		auto& gltfPrimitive = gltfMesh.primitives[ 0 ];
+		auto& rOutMesh      = pModel->pCollisionMeshes[ iOutCollisionMesh++ ];
+
+		const TINT iAccPositionIndex = gltfPrimitive.attributes.at( "POSITION" );
+		auto&      gltfPositionAcc   = gltfModel.accessors[ iAccPositionIndex ];
+		auto&      gltfPositionView  = gltfModel.bufferViews[ gltfPositionAcc.bufferView ];
+		auto&      gltfPositionBuf   = gltfModel.buffers[ gltfPositionView.buffer ];
+
+		TASSERT( gltfPositionAcc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
+		TASSERT( gltfPositionAcc.type == TINYGLTF_TYPE_VEC3 );
+
+		const TUINT uiPositionStride = ( gltfPositionView.byteStride != 0 ) ? gltfPositionView.byteStride : sizeof( TVector3 );
+
+		rOutMesh.iBoneID       = -1;
+		rOutMesh.uiNumVertices = gltfPositionAcc.count;
+		rOutMesh.vecVertices.SetSize( rOutMesh.uiNumVertices );
+
+		for ( TUINT k = 0; k < rOutMesh.uiNumVertices; k++ )
+		{
+			const TBYTE* pPosition = gltfPositionBuf.data.data() + gltfPositionView.byteOffset + gltfPositionAcc.byteOffset + ( uiPositionStride * k );
+			rOutMesh.vecVertices[ k ] = *TREINTERPRETCAST( const TVector3*, pPosition );
+		}
+
+		auto& gltfIndexAcc  = gltfModel.accessors[ gltfPrimitive.indices ];
+		auto& gltfIndexView = gltfModel.bufferViews[ gltfIndexAcc.bufferView ];
+		auto& gltfIndexBuf  = gltfModel.buffers[ gltfIndexView.buffer ];
+
+		TASSERT( gltfIndexAcc.type == TINYGLTF_TYPE_SCALAR );
+
+		rOutMesh.uiNumIndices = gltfIndexAcc.count;
+		rOutMesh.vecIndices.SetSize( rOutMesh.uiNumIndices );
+
+		for ( TUINT k = 0; k < rOutMesh.uiNumIndices; k++ )
+			rOutMesh.vecIndices[ k ] = ModelLoader_ReadGLTFIndex( gltfIndexBuf, gltfIndexView, gltfIndexAcc, k );
+
+		const tinygltf::Node* pNode = ( vecCollisionNodes[ i ] != -1 ) ? &gltfModel.nodes[ vecCollisionNodes[ i ] ] : TNULL;
+
+		auto& rGroup = rOutMesh.vecGroups.PushBack();
+		rGroup.strName    = ModelLoader_GetGLTFCollisionName( gltfModel, pNode, gltfMesh );
+		rGroup.uiNumFaces = rOutMesh.uiNumIndices / 3;
+	}
+}
 
 Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath )
 {
@@ -57,20 +257,22 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 	pModel->eModelType         = ModelType::Skin;
 	pModel->pTRB               = NULL;
 	pModel->iLODCount          = 1;
-	pModel->aLODDistances[ 0 ] = 50.0f;
+	pModel->fRenderDistance    = 50.0f;
 	pModel->bAnimationsLoaded  = TFALSE;
+
+	ModelLoader_InitLODDistances( pModel->aLODDistances );
 
 	// We can't have more than 1 skins on a single model
 	TASSERT( gltfModel.skins.size() <= 1 );
 
 	// Setup skeleton
 	T2Map<TINT, TINT> mapGltfBoneToTRVBone;
-	const TBOOL bHasSkins = gltfModel.skins.size() == 1;
+	const TBOOL       bHasSkins = gltfModel.skins.size() == 1;
 	if ( bHasSkins )
 	{
 		TINFO( "Detected skin\n" );
 		auto pGLTFSkin = &gltfModel.skins[ 0 ];
-		
+
 		// Get animations
 		static TBOOL bAllowDuplicates = g_pCmd->HasParameter( "-allow-duplicates" );
 
@@ -206,6 +408,9 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		TKLBuilder  oTKLBuilder;
 		const TBOOL bGlobalTKLBuilder = s_pTKLBuilder != TNULL;
 		TKLBuilder* pTKLBuilder       = bGlobalTKLBuilder ? s_pTKLBuilder : &oTKLBuilder;
+		const TINT  iTBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetTranslations().Size() : 0;
+		const TINT  iQBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetRotations().Size() : 0;
+		const TINT  iSBaseIndex       = bGlobalTKLBuilder ? pTKLBuilder->GetScales().Size() : 0;
 
 		pModel->pSkeleton->m_SkeletonSequences = new TSkeletonSequence[ iNumSeq ];
 		TSkeletonSequence* pSeqs               = pModel->pSkeleton->m_SkeletonSequences;
@@ -226,7 +431,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 				TASSERT( gltfModel.accessors[ gltfAnimSampler.input ].maxValues.empty() == TFALSE );
 
 				const TFLOAT flKeyTime = TFLOAT( gltfModel.accessors[ gltfAnimSampler.input ].maxValues[ 0 ] );
-				flAnimDuration = TMath::Max( flAnimDuration, flKeyTime );
+				flAnimDuration         = TMath::Max( flAnimDuration, flKeyTime );
 
 				const TINT iTRBBone = mapGltfBoneToTRVBone[ gltfAnimChannel.target_node ]->second;
 				if ( mapBoneChannels.Find( iTRBBone ) == mapBoneChannels.End() )
@@ -255,16 +460,16 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			{
 				auto pSeqBone = &pSeqBones[ k ];
 
-				auto itChannels = mapBoneChannels.Find( k );
-				const TBOOL bAnimated = itChannels != mapBoneChannels.End();
+				auto        itChannels = mapBoneChannels.Find( k );
+				const TBOOL bAnimated  = itChannels != mapBoneChannels.End();
 
 				if ( !bAnimated )
 				{
-					pSeqBone->m_eFlags   = 2;
-					pSeqBone->m_iKeySize = 4;
-					pSeqBone->m_iNumKeys = 0;
-					pSeqBone->m_pData    = new TBYTE[ sizeof( TUINT16 ) ];
- 					pSeqBone->GetKey( 0 )[ 0 ] = 0;
+					pSeqBone->m_eFlags         = 2;
+					pSeqBone->m_iKeySize       = 4;
+					pSeqBone->m_iNumKeys       = 0;
+					pSeqBone->m_pData          = new TBYTE[ sizeof( TUINT16 ) ];
+					pSeqBone->GetKey( 0 )[ 0 ] = 0;
 				}
 				else
 				{
@@ -320,7 +525,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 						const TSIZE uiNumKeyFrames = gltfTimeAccessor.count;
 						for ( TSIZE j = 0; j < uiNumKeyFrames; j++ )
 						{
-							TFLOAT flTime = *(TFLOAT*)( &*( pGltfDataTime + ( uiTimeBufferStride * j ) + gltfTimeAccessor.byteOffset ) );
+							TFLOAT  flTime           = *(TFLOAT*)( &*( pGltfDataTime + ( uiTimeBufferStride * j ) + gltfTimeAccessor.byteOffset ) );
 							TUINT16 uiCompressedTime = TUINT16( ( flTime / flAnimDuration ) * 65535 );
 
 							// Find or create keyframe
@@ -334,14 +539,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 								TASSERT( pKeyFrame->iRotation == -1 );
 								TQuaternion& quatRotation = *(TQuaternion*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
 
-								pKeyFrame->iRotation = pTKLBuilder->AddRotation( quatRotation );
+								pKeyFrame->iRotation = pTKLBuilder->AddRotation( quatRotation, iQBaseIndex ) - iQBaseIndex;
 							}
 							else if ( bIsTranslation )
 							{
 								TASSERT( pKeyFrame->iTranslation == -1 );
 								TVector3& vPosition = *(TVector3*)( &*( pGltfData + ( uiDataBufferStride * j ) + gltfDataAccessor.byteOffset ) );
-								
-								pKeyFrame->iTranslation = pTKLBuilder->AddTranslation( vPosition );
+
+								pKeyFrame->iTranslation = pTKLBuilder->AddTranslation( vPosition, iTBaseIndex ) - iTBaseIndex;
 							}
 						}
 					}
@@ -359,7 +564,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 					{
 						TASSERT( it->second.iRotation != -1 );
 						TASSERT( !bTranslationAnimated || it->second.iTranslation != -1 );
-						
+
 						TUINT16* pKey = pSeqBone->GetKey( iKeyFrameIndex++ );
 
 						pKey[ 0 ] = it->first;
@@ -379,18 +584,18 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		else
 		{
 			// Generate name
-			static TINT s_iTKLId = 0;
-			TString8 strTKLName = TString8::VarArgs( "dyn_tkl%d", s_iTKLId++ );
+			static TINT s_iTKLId   = 0;
+			TString8    strTKLName = TString8::VarArgs( "dyn_tkl%d", s_iTKLId++ );
 			TASSERT( strTKLName.Length() <= sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 && "Curse me if this happened" );
 			T2String8::Copy( pModel->oSkeletonHeader.m_szTKLName, strTKLName.GetString(), sizeof( pModel->oSkeletonHeader.m_szTKLName ) - 1 );
 		}
 
-		pModel->oSkeletonHeader.m_iTKeyCount  = pTKLBuilder->GetTranslations().Size();
-		pModel->oSkeletonHeader.m_iQKeyCount  = pTKLBuilder->GetRotations().Size();
-		pModel->oSkeletonHeader.m_iSKeyCount  = pTKLBuilder->GetScales().Size();
-		pModel->oSkeletonHeader.m_iTBaseIndex = 0;
-		pModel->oSkeletonHeader.m_iQBaseIndex = 0;
-		pModel->oSkeletonHeader.m_iSBaseIndex = 0;
+		pModel->oSkeletonHeader.m_iTKeyCount  = pTKLBuilder->GetTranslations().Size() - iTBaseIndex;
+		pModel->oSkeletonHeader.m_iQKeyCount  = pTKLBuilder->GetRotations().Size() - iQBaseIndex;
+		pModel->oSkeletonHeader.m_iSKeyCount  = pTKLBuilder->GetScales().Size() - iSBaseIndex;
+		pModel->oSkeletonHeader.m_iTBaseIndex = iTBaseIndex;
+		pModel->oSkeletonHeader.m_iQBaseIndex = iQBaseIndex;
+		pModel->oSkeletonHeader.m_iSBaseIndex = iSBaseIndex;
 
 		if ( bGlobalTKLBuilder )
 			pModel->pKeyLib = Resource::StreamedKeyLib_FindOrCreateDummy( TPS8D( pTKLBuilder->GetName() ) );
@@ -400,367 +605,424 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		Model_PrepareAnimations( pModel.Get() );
 	}
 
-	// Create main LOD object
-	// TODO: support multiple LODs
-	const TINT iLODIdx = 0;
-
-	// Calculate actual number of meshes
+	// Calculate actual number of meshes per LOD.
 	// To make it clear, we count meshes only when materials differ, but Skinned models can have submeshes to fit all bones
-	TINT iNumMaterials = 0;
-	T2DynamicVector<TSIZE> vecActualMeshes;
+	TINT                   iMaxLODIdx         = 0;
+	TINT                   aNumMaterials[ 5 ] = {};
+	T2DynamicVector<TSIZE> vecActualMeshesByLOD[ 5 ];
+	T2DynamicVector<TINT>  vecMeshLODs;
+	T2DynamicVector<TBOOL> vecCollisionMeshes;
+	T2Map<TINT, TINT>      aMapGltfMatToTRVMat[ 5 ];
 
-	T2Map<TINT, TINT> mapGltfMatToTRVMat;
+	vecMeshLODs.SetSize( gltfModel.meshes.size() );
+	vecCollisionMeshes.SetSize( gltfModel.meshes.size() );
 	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
 	{
-		auto& gltfMesh = gltfModel.meshes[i];
-
-		TASSERT( gltfMesh.primitives.size() == 1 );
-
-		const TINT iGltfMatIdx = gltfMesh.primitives[ 0 ].material;
-		if ( mapGltfMatToTRVMat.Find( iGltfMatIdx ) == mapGltfMatToTRVMat.End() )
-		{
-			mapGltfMatToTRVMat.Insert( iGltfMatIdx, iNumMaterials );
-
-			iNumMaterials += 1;
-			vecActualMeshes.PushBack( i );
-		}
+		const TINT iLODIdx = ModelLoader_ParseGLTFMeshLOD( gltfModel.meshes[ i ].name.c_str() );
+		vecMeshLODs[ i ]   = ( iLODIdx != -1 ) ? iLODIdx : 0;
+		vecCollisionMeshes[ i ] = TFALSE;
 	}
 
-	// Setup the LOD
-	pModel->aLODs[ iLODIdx ].iNumMeshes     = TINT( vecActualMeshes.Size() );
-	pModel->aLODs[ iLODIdx ].ppMeshes       = new TMesh*[ vecActualMeshes.Size() ];
-	pModel->aLODs[ iLODIdx ].BoundingSphere = TSphere( 0.0f, 0.0f, 0.0f, 50.0f ); // TODO: CALCULATE IT
-
-	// Process and setup meshes and submeshes
-	for ( TINT i = 0; i < vecActualMeshes.Size(); i++ )
+	for ( TSIZE i = 0; i < gltfModel.nodes.size(); i++ )
 	{
-		auto  iGltfMeshIdx    = vecActualMeshes[ i ];
-		auto& gltfMesh        = gltfModel.meshes[ iGltfMeshIdx ];
-		auto& gltfPrimitive   = gltfMesh.primitives[ 0 ];
-		auto  gltfMaterialIdx = gltfPrimitive.material;
-		auto& gltfMaterial    = gltfModel.materials[ gltfMaterialIdx ];
-		
+		auto& gltfNode = gltfModel.nodes[ i ];
+
+		if ( gltfNode.name == "Collision" )
+		{
+			ModelLoader_MarkGLTFCollisionMeshes( gltfModel, i, vecCollisionMeshes );
+			continue;
+		}
+
+		if ( gltfNode.mesh < 0 || gltfNode.mesh >= TINT( gltfModel.meshes.size() ) ) continue;
+
+		const TINT iLODIdx = ModelLoader_ParseGLTFMeshLOD( gltfNode.name.c_str() );
+		if ( iLODIdx != -1 ) vecMeshLODs[ gltfNode.mesh ] = iLODIdx;
+	}
+
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		auto& gltfMesh = gltfModel.meshes[ i ];
+		if ( gltfMesh.primitives.empty() ) continue;
+
+		const TINT iMaterial = gltfMesh.primitives[ 0 ].material;
+		if ( iMaterial >= 0 && iMaterial < TINT( gltfModel.materials.size() ) && gltfModel.materials[ iMaterial ].name.rfind( "Collision_", 0 ) == 0 )
+			vecCollisionMeshes[ i ] = TTRUE;
+	}
+
+	ModelLoader_LoadGLTFCollisionMeshes( gltfModel, pModel.Get(), vecCollisionMeshes );
+
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		auto& gltfMesh = gltfModel.meshes[ i ];
+		if ( vecCollisionMeshes[ i ] ) continue;
+
 		TASSERT( gltfMesh.primitives.size() == 1 );
 
-		T2FormatString128 symbolName;
-		symbolName.Format( "LOD%d_Mesh_%d", iLODIdx, i );
+		const TINT iLODIdx     = vecMeshLODs[ i ];
+		const TINT iGltfMatIdx = gltfMesh.primitives[ 0 ].material;
+		if ( iGltfMatIdx >= 0 && iGltfMatIdx < TINT( gltfModel.materials.size() ) && gltfModel.materials[ iGltfMatIdx ].name.rfind( "Collision_", 0 ) == 0 ) continue;
 
-		SkinMesh*                 pMesh     = g_pSkinShader->CreateMesh();
-		T2SharedPtr<SkinMaterial> pMaterial = g_pSkinShader->CreateMaterial();
-
-		// Find all submeshes
-		T2DynamicVector<TSIZE> vecSubMeshes;
-		for ( TSIZE k = 0; k < gltfModel.meshes.size(); k++ )
+		if ( aMapGltfMatToTRVMat[ iLODIdx ].Find( iGltfMatIdx ) == aMapGltfMatToTRVMat[ iLODIdx ].End() )
 		{
-			if ( gltfModel.meshes[ k ].primitives[ 0 ].material == gltfMaterialIdx )
-				vecSubMeshes.PushBack( k );
+			aMapGltfMatToTRVMat[ iLODIdx ].Insert( iGltfMatIdx, aNumMaterials[ iLODIdx ] );
+
+			aNumMaterials[ iLODIdx ] += 1;
+			vecActualMeshesByLOD[ iLODIdx ].PushBack( i );
 		}
 
-		// Get the texture
-		const TCHAR* pchTextureName = "NoTexture";
+		iMaxLODIdx = TMath::Max( iMaxLODIdx, iLODIdx );
+	}
 
-		if ( gltfMaterial.pbrMetallicRoughness.baseColorTexture.index >= 0 )
-			pchTextureName = gltfModel.images[ gltfModel.textures[ gltfMaterial.pbrMetallicRoughness.baseColorTexture.index ].source ].uri.c_str();
+	pModel->iLODCount = iMaxLODIdx + 1;
+	for ( TINT iLODIdx = 0; iLODIdx < pModel->iLODCount; iLODIdx++ )
+	{
+		auto& vecActualMeshes = vecActualMeshesByLOD[ iLODIdx ];
 
- 		auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pchTextureName ) );
+		// Setup the LOD
+		pModel->aLODs[ iLODIdx ].iNumMeshes     = TINT( vecActualMeshes.Size() );
+		pModel->aLODs[ iLODIdx ].ppMeshes       = new TMesh*[ vecActualMeshes.Size() ];
+		pModel->aLODs[ iLODIdx ].BoundingSphere = TSphere( 0.0f, 0.0f, 0.0f, 0.0f );
 
-		pMaterial->SetTexture( pTexture );
-		pMaterial->SetName( gltfMaterial.name.c_str() );
-		pModel->vecUsedTextures.PushBack( pTexture );
+		// Collected to derive a fallback bounding sphere below
+		T2DynamicVector<TVector3> vecLODPositions;
 
-		pMesh->SetName( symbolName.Get() );
-		pMesh->SetMaterialName( gltfMaterial.name.c_str() );
-		pMesh->SetMaterial( pMaterial );
-		pMesh->vecSubMeshes.Reserve( vecSubMeshes.Size() );
-
-		pModel->aLODs[ iLODIdx ].ppMeshes[ i ] = pMesh;
-
-		// Prepare vertex buffer
-		T2DynamicVector<SkinMesh::SkinVertex> vecVertices;
-		pMesh->oVertexBuffer = T2Render::CreateVertexBuffer( TNULL, 0, GL_STATIC_DRAW );
-
-		tinygltf::Skin* pGLTFSkin = ( bHasSkins ) ? &gltfModel.skins[ 0 ] : TNULL;
-
-		// Handle submeshes
-		TINT iPreviousAccPositionIndex = -1;
-		for ( TINT k = 0; k < vecSubMeshes.Size(); k++ )
+		// Process and setup meshes and submeshes
+		for ( TINT i = 0; i < vecActualMeshes.Size(); i++ )
 		{
-			auto& gltfSubMesh          = gltfModel.meshes[ vecSubMeshes[ k ] ];
-			auto& gltfSubMeshPrimitive = gltfSubMesh.primitives[ 0 ];
-			auto  pSubMesh             = &pMesh->vecSubMeshes.PushBack();
+			auto  iGltfMeshIdx    = vecActualMeshes[ i ];
+			auto& gltfMesh        = gltfModel.meshes[ iGltfMeshIdx ];
+			auto& gltfPrimitive   = gltfMesh.primitives[ 0 ];
+			auto  gltfMaterialIdx = gltfPrimitive.material;
+			auto& gltfMaterial    = gltfModel.materials[ gltfMaterialIdx ];
 
-			TASSERT( gltfSubMesh.primitives.size() == 1 );
+			TASSERT( gltfMesh.primitives.size() == 1 );
 
-			TASSERT( gltfSubMeshPrimitive.attributes.contains( "POSITION" ) );
-			TASSERT( gltfSubMeshPrimitive.attributes.contains( "NORMAL" ) );
-			TASSERT( gltfSubMeshPrimitive.attributes.contains( "WEIGHTS_0" ) );
-			TASSERT( gltfSubMeshPrimitive.attributes.contains( "JOINTS_0" ) );
-			TASSERT( gltfSubMeshPrimitive.attributes.contains( "TEXCOORD_0" ) );
+			T2FormatString128 symbolName;
+			symbolName.Format( "LOD%d_Mesh_%d", iLODIdx, i );
 
-			const TINT iAccIndicesIndex  = gltfSubMeshPrimitive.indices;
-			const TINT iAccPositionIndex = gltfSubMeshPrimitive.attributes[ "POSITION" ];
-			const TINT iAccNormalIndex   = gltfSubMeshPrimitive.attributes[ "NORMAL" ];
-			const TINT iAccWeightsIndex  = gltfSubMeshPrimitive.attributes[ "WEIGHTS_0" ];
-			const TINT iAccJointsIndex   = gltfSubMeshPrimitive.attributes[ "JOINTS_0" ];
-			const TINT iAccUVIndex       = gltfSubMeshPrimitive.attributes[ "TEXCOORD_0" ];
+			SkinMesh*                 pMesh     = g_pSkinShader->CreateMesh();
+			T2SharedPtr<SkinMaterial> pMaterial = g_pSkinShader->CreateMaterial();
 
-			const TBOOL bSharedVertexPool = iPreviousAccPositionIndex == iAccPositionIndex;
-			iPreviousAccPositionIndex     = iAccPositionIndex;
-
-			auto& gltfIndexAccessor    = gltfModel.accessors[ iAccIndicesIndex ];
-			auto& gltfPositionAccessor = gltfModel.accessors[ iAccPositionIndex ];
-			auto& gltfNormalAccessor   = gltfModel.accessors[ iAccNormalIndex ];
-			auto& gltfWeightsAccessor  = gltfModel.accessors[ iAccWeightsIndex ];
-			auto& gltfJointsAccessor   = gltfModel.accessors[ iAccJointsIndex ];
-			auto& gltfUVAccessor       = gltfModel.accessors[ iAccUVIndex ];
-
-			auto& gltfIndexBufferView    = gltfModel.bufferViews[ gltfIndexAccessor.bufferView ];
-			auto& gltfPositionBufferView = gltfModel.bufferViews[ gltfPositionAccessor.bufferView ];
-			auto& gltfNormalBufferView   = gltfModel.bufferViews[ gltfNormalAccessor.bufferView ];
-			auto& gltfWeightsBufferView  = gltfModel.bufferViews[ gltfWeightsAccessor.bufferView ];
-			auto& gltfJointsBufferView   = gltfModel.bufferViews[ gltfJointsAccessor.bufferView ];
-			auto& gltfUVBufferView       = gltfModel.bufferViews[ gltfUVAccessor.bufferView ];
-
-			auto& gltfIndexBuffer    = gltfModel.buffers[ gltfIndexBufferView.buffer ];
-			auto& gltfPositionBuffer = gltfModel.buffers[ gltfPositionBufferView.buffer ];
-			auto& gltfNormalBuffer   = gltfModel.buffers[ gltfNormalBufferView.buffer ];
-			auto& gltfWeightsBuffer  = gltfModel.buffers[ gltfWeightsBufferView.buffer ];
-			auto& gltfJointsBuffer   = gltfModel.buffers[ gltfJointsBufferView.buffer ];
-			auto& gltfUVBuffer       = gltfModel.buffers[ gltfUVBufferView.buffer ];
-			
-			TASSERT( gltfIndexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT );
-			TASSERT( gltfIndexAccessor.type == TINYGLTF_TYPE_SCALAR );
-
-			const TUINT uiStartVertex = vecVertices.Size();
-
-			// Setup indices
-			const TUINT              uiNumIndicesOrig = gltfIndexAccessor.count;
-			T2DynamicVector<TUINT16> vecIndices;
-			vecIndices.SetSize( uiNumIndicesOrig );
-
-			auto        pGltfDataIndex      = gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset;
-			const TUINT uiIndexBufferStride = ( gltfIndexBufferView.byteStride != 0 ) ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
-			const TBOOL bIsTriangleStrip    = gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLE_STRIP;
-
-			// Copy indices
-			for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+			// Find all submeshes
+			T2DynamicVector<TSIZE> vecSubMeshes;
+			for ( TSIZE k = 0; k < gltfModel.meshes.size(); k++ )
 			{
-				TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
-
-				if ( bSharedVertexPool )
-				{
-					// Using a shared vertex pool, so just copy the index
-					vecIndices[ j ] = uiIndex;
-				}
-				else
-				{
-					// Not using shared pool, need to increase index by the last vertex id
-					if ( !bIsTriangleStrip || uiIndex != 0xFFFF ) vecIndices[ j ] = uiIndex + uiStartVertex;
-					else vecIndices[ j ] = 0xFFFF;
-				}
+				if ( !vecCollisionMeshes[ k ] && vecMeshLODs[ k ] == iLODIdx && gltfModel.meshes[ k ].primitives[ 0 ].material == gltfMaterialIdx )
+					vecSubMeshes.PushBack( k );
 			}
 
-			// Count vertices
-			T2RedBlackTree<TUINT16> treeUsedVertices;
-			for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+			// Get the texture
+			const TCHAR* pchTextureName = "NoTexture";
+
+			if ( gltfMaterial.pbrMetallicRoughness.baseColorTexture.index >= 0 )
+				pchTextureName = gltfModel.images[ gltfModel.textures[ gltfMaterial.pbrMetallicRoughness.baseColorTexture.index ].source ].uri.c_str();
+
+			auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pchTextureName ) );
+
+			pMaterial->SetTexture( pTexture );
+			pMaterial->SetName( gltfMaterial.name.c_str() );
+			pModel->vecUsedTextures.PushBack( pTexture );
+
+			pMesh->SetName( symbolName.Get() );
+			pMesh->SetMaterialName( gltfMaterial.name.c_str() );
+			pMesh->SetMaterial( pMaterial );
+			pMesh->vecSubMeshes.Reserve( vecSubMeshes.Size() );
+
+			pModel->aLODs[ iLODIdx ].ppMeshes[ i ] = pMesh;
+
+			// Prepare vertex buffer
+			T2DynamicVector<SkinMesh::SkinVertex> vecVertices;
+			pMesh->oVertexBuffer = T2Render::CreateVertexBuffer( TNULL, 0, GL_STATIC_DRAW );
+
+			tinygltf::Skin* pGLTFSkin = ( bHasSkins ) ? &gltfModel.skins[ 0 ] : TNULL;
+
+			// Handle submeshes
+			TINT iPreviousAccPositionIndex = -1;
+			for ( TINT k = 0; k < vecSubMeshes.Size(); k++ )
 			{
-				TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
-				if ( bIsTriangleStrip && uiIndex == 0xFFFF ) continue;
+				auto& gltfSubMesh          = gltfModel.meshes[ vecSubMeshes[ k ] ];
+				auto& gltfSubMeshPrimitive = gltfSubMesh.primitives[ 0 ];
+				auto  pSubMesh             = &pMesh->vecSubMeshes.PushBack();
 
-				if ( treeUsedVertices.Find( uiIndex ) == treeUsedVertices.End() ) treeUsedVertices.Insert( uiIndex );
-			}
+				TASSERT( gltfSubMesh.primitives.size() == 1 );
 
-			// Setup vertices
-			const TUINT uiNumVerticesOrig = treeUsedVertices.Size();
-			vecVertices.SetSize( uiStartVertex + uiNumVerticesOrig );
+				TASSERT( gltfSubMeshPrimitive.attributes.contains( "POSITION" ) );
+				TASSERT( gltfSubMeshPrimitive.attributes.contains( "NORMAL" ) );
+				TASSERT( gltfSubMeshPrimitive.attributes.contains( "WEIGHTS_0" ) );
+				TASSERT( gltfSubMeshPrimitive.attributes.contains( "JOINTS_0" ) );
+				TASSERT( gltfSubMeshPrimitive.attributes.contains( "TEXCOORD_0" ) );
 
-			TASSERT( gltfPositionAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-			TASSERT( gltfPositionAccessor.type == TINYGLTF_TYPE_VEC3 );
-			auto pGltfDataPosition = gltfPositionBuffer.data.begin() + gltfPositionBufferView.byteOffset;
-			const TUINT uiPositionBufferStride = ( gltfPositionBufferView.byteStride != 0 ) ? gltfPositionBufferView.byteStride : sizeof( TVector3 );
+				const TINT iAccIndicesIndex  = gltfSubMeshPrimitive.indices;
+				const TINT iAccPositionIndex = gltfSubMeshPrimitive.attributes[ "POSITION" ];
+				const TINT iAccNormalIndex   = gltfSubMeshPrimitive.attributes[ "NORMAL" ];
+				const TINT iAccWeightsIndex  = gltfSubMeshPrimitive.attributes[ "WEIGHTS_0" ];
+				const TINT iAccJointsIndex   = gltfSubMeshPrimitive.attributes[ "JOINTS_0" ];
+				const TINT iAccUVIndex       = gltfSubMeshPrimitive.attributes[ "TEXCOORD_0" ];
 
-			TASSERT( gltfNormalAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-			TASSERT( gltfNormalAccessor.type == TINYGLTF_TYPE_VEC3 );
-			auto pGltfDataNormal = gltfNormalBuffer.data.begin() + gltfNormalBufferView.byteOffset;
-			const TUINT uiNormalBufferStride = ( gltfNormalBufferView.byteStride != 0 ) ? gltfNormalBufferView.byteStride : sizeof( TVector3 );
+				const TBOOL bSharedVertexPool = iPreviousAccPositionIndex == iAccPositionIndex;
+				iPreviousAccPositionIndex     = iAccPositionIndex;
 
-			TASSERT( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT || gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
-			TASSERT( gltfWeightsAccessor.type == TINYGLTF_TYPE_VEC4 );
-			auto pGltfDataWeights = gltfWeightsBuffer.data.begin() + gltfWeightsBufferView.byteOffset;
-			const TUINT uiWeightsBufferStride = ( gltfWeightsBufferView.byteStride != 0 ) ? gltfWeightsBufferView.byteStride : ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ? sizeof( TVector4 ) : sizeof( TUINT32 ) );
+				auto& gltfIndexAccessor    = gltfModel.accessors[ iAccIndicesIndex ];
+				auto& gltfPositionAccessor = gltfModel.accessors[ iAccPositionIndex ];
+				auto& gltfNormalAccessor   = gltfModel.accessors[ iAccNormalIndex ];
+				auto& gltfWeightsAccessor  = gltfModel.accessors[ iAccWeightsIndex ];
+				auto& gltfJointsAccessor   = gltfModel.accessors[ iAccJointsIndex ];
+				auto& gltfUVAccessor       = gltfModel.accessors[ iAccUVIndex ];
 
-			TASSERT( gltfJointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
-			TASSERT( gltfJointsAccessor.type == TINYGLTF_TYPE_VEC4 );
-			auto pGltfDataJoints = gltfJointsBuffer.data.begin() + gltfJointsBufferView.byteOffset;
-			const TUINT uiJointsBufferStride = ( gltfJointsBufferView.byteStride != 0 ) ? gltfJointsBufferView.byteStride : sizeof( TUINT32 );
-			
-			TASSERT( gltfUVAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
-			TASSERT( gltfUVAccessor.type == TINYGLTF_TYPE_VEC2 );
-			auto pGltfDataUV = gltfUVBuffer.data.begin() + gltfUVBufferView.byteOffset;
-			const TUINT uiUVBufferStride = ( gltfUVBufferView.byteStride != 0 ) ? gltfUVBufferView.byteStride : sizeof( TVector2 );
-			
-			// Build vertices
-			TUINT j = uiStartVertex;
-			T2Map<TINT, TINT> mapUsedBones;
-			T2_FOREACH( treeUsedVertices, itVertex )
-			{
-				TUINT16 m = *itVertex;
+				auto& gltfIndexBufferView    = gltfModel.bufferViews[ gltfIndexAccessor.bufferView ];
+				auto& gltfPositionBufferView = gltfModel.bufferViews[ gltfPositionAccessor.bufferView ];
+				auto& gltfNormalBufferView   = gltfModel.bufferViews[ gltfNormalAccessor.bufferView ];
+				auto& gltfWeightsBufferView  = gltfModel.bufferViews[ gltfWeightsAccessor.bufferView ];
+				auto& gltfJointsBufferView   = gltfModel.bufferViews[ gltfJointsAccessor.bufferView ];
+				auto& gltfUVBufferView       = gltfModel.bufferViews[ gltfUVAccessor.bufferView ];
 
-				vecVertices[ j ].Position = *(TVector3*)( &*( pGltfDataPosition + ( uiPositionBufferStride * m ) + gltfPositionAccessor.byteOffset ) );
-				vecVertices[ j ].Normal   = *(TVector3*)( &*( pGltfDataNormal + ( uiNormalBufferStride * m ) + gltfNormalAccessor.byteOffset ) );
-				vecVertices[ j ].UV       = *(TVector2*)( &*( pGltfDataUV + ( uiUVBufferStride * m ) + gltfUVAccessor.byteOffset ) );
+				auto& gltfIndexBuffer    = gltfModel.buffers[ gltfIndexBufferView.buffer ];
+				auto& gltfPositionBuffer = gltfModel.buffers[ gltfPositionBufferView.buffer ];
+				auto& gltfNormalBuffer   = gltfModel.buffers[ gltfNormalBufferView.buffer ];
+				auto& gltfWeightsBuffer  = gltfModel.buffers[ gltfWeightsBufferView.buffer ];
+				auto& gltfJointsBuffer   = gltfModel.buffers[ gltfJointsBufferView.buffer ];
+				auto& gltfUVBuffer       = gltfModel.buffers[ gltfUVBufferView.buffer ];
 
-				TUINT8* pJoints = (TUINT8*)( &*( pGltfDataJoints + ( uiJointsBufferStride * m ) + gltfJointsAccessor.byteOffset ) );
+				TASSERT( gltfIndexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT );
+				TASSERT( gltfIndexAccessor.type == TINYGLTF_TYPE_SCALAR );
 
-				TINT iBoneIndex1 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 0 ] ] ]->second : 0;
-				TINT iBoneIndex2 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 1 ] ] ]->second : 0;
-				TINT iBoneIndex3 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 2 ] ] ]->second : 0;
-				TINT iBoneIndex4 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 3 ] ] ]->second : 0;
+				const TUINT uiStartVertex = vecVertices.Size();
 
-				// Read weights
-				TFLOAT flWeight1, flWeight2, flWeight3, flWeight4;
-				if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT )
+				// Setup indices
+				const TUINT              uiNumIndicesOrig = gltfIndexAccessor.count;
+				T2DynamicVector<TUINT16> vecIndices;
+				vecIndices.SetSize( uiNumIndicesOrig );
+
+				auto        pGltfDataIndex      = gltfIndexBuffer.data.begin() + gltfIndexBufferView.byteOffset;
+				const TUINT uiIndexBufferStride = ( gltfIndexBufferView.byteStride != 0 ) ? gltfIndexBufferView.byteStride : sizeof( TUINT16 );
+				const TBOOL bIsTriangleStrip    = gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLE_STRIP;
+
+				// Copy indices
+				for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
 				{
-					// Read weights as floats
-					TFLOAT* pWeights = (TFLOAT*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
+					TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
 
-					flWeight1 = pWeights[ 0 ];
-					flWeight2 = pWeights[ 1 ];
-					flWeight3 = pWeights[ 2 ];
-					flWeight4 = pWeights[ 3 ];
-				}
-				else if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE )
-				{
-					// Read weights as TUINT8 bytes
-					TUINT8* pWeights = (TUINT8*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
-
-					flWeight1 = pWeights[ 0 ] / 255.0f;
-					flWeight2 = pWeights[ 1 ] / 255.0f;
-					flWeight3 = pWeights[ 2 ] / 255.0f;
-					flWeight4 = pWeights[ 3 ] / 255.0f;
-				}
-
-				const TBOOL bHasSpaceForBones = mapUsedBones.Size() < SKINNED_SUBMESH_MAX_BONES;
-				const TBOOL bBoneAnimated1    = flWeight1 >= ( 1.0f / 255.0f ) && pJoints[ 0 ];
-				const TBOOL bBoneAnimated2    = flWeight2 >= ( 1.0f / 255.0f ) && pJoints[ 1 ];
-				const TBOOL bBoneAnimated3    = flWeight3 >= ( 1.0f / 255.0f ) && pJoints[ 2 ];
-				const TBOOL bBoneAnimated4    = flWeight4 >= ( 1.0f / 255.0f ) && pJoints[ 3 ];
-
-				if ( bHasSpaceForBones && bBoneAnimated1 && mapUsedBones.Find( iBoneIndex1 ) == mapUsedBones.End() )
-				{
-					pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex1;
-					mapUsedBones.Insert( iBoneIndex1, mapUsedBones.Size() );
-				}
-
-				if ( bHasSpaceForBones && bBoneAnimated2 && mapUsedBones.Find( iBoneIndex2 ) == mapUsedBones.End() )
-				{
-					pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex2;
-					mapUsedBones.Insert( iBoneIndex2, mapUsedBones.Size() );
-				}
-
-				if ( bHasSpaceForBones && bBoneAnimated3 && mapUsedBones.Find( iBoneIndex3 ) == mapUsedBones.End() )
-				{
-					pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex3;
-					mapUsedBones.Insert( iBoneIndex3, mapUsedBones.Size() );
-				}
-
-				if ( bHasSpaceForBones && bBoneAnimated4 && mapUsedBones.Find( iBoneIndex4 ) == mapUsedBones.End() )
-				{
-					pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex4;
-					mapUsedBones.Insert( iBoneIndex4, mapUsedBones.Size() );
-				}
-
-				TBOOL bNoBoneAnimated = !bBoneAnimated1 && !bBoneAnimated2 && !bBoneAnimated3 && !bBoneAnimated4;
-
-				vecVertices[ j ].Bones[ 0 ] = bBoneAnimated1 ? ( mapUsedBones[ iBoneIndex1 ]->second * 3 ) : 0;
-				vecVertices[ j ].Bones[ 1 ] = bBoneAnimated2 ? ( mapUsedBones[ iBoneIndex2 ]->second * 3 ) : 0;
-				vecVertices[ j ].Bones[ 2 ] = bBoneAnimated3 ? ( mapUsedBones[ iBoneIndex3 ]->second * 3 ) : 0;
-				vecVertices[ j ].Bones[ 3 ] = bBoneAnimated4 ? ( mapUsedBones[ iBoneIndex4 ]->second * 3 ) : 0;
-
-				TUINT8 uiWeight1 = TUINT8( TMath::Round( flWeight1 * 255.0f ) );
-				TUINT8 uiWeight2 = TUINT8( TMath::Round( flWeight2 * 255.0f ) );
-				TUINT8 uiWeight3 = TUINT8( TMath::Round( flWeight3 * 255.0f ) );
-				TUINT8 uiWeight4 = TUINT8( TMath::Round( flWeight4 * 255.0f ) );
-
-				// Normalize weights
-				TUINT16 uiWeightsSum = uiWeight1 + uiWeight2 + uiWeight3 + uiWeight4;
-				if ( uiWeightsSum != 255 )
-				{
-					TUINT8* pMax = &uiWeight1;
-
-					if ( *pMax < uiWeight2 ) pMax = &uiWeight2;
-					if ( *pMax < uiWeight3 ) pMax = &uiWeight3;
-					if ( *pMax < uiWeight4 ) pMax = &uiWeight4;
-
-					// TODO: distribute across all?
-					if ( uiWeightsSum > 255 )
-						*pMax = *pMax - ( uiWeightsSum - 255 );
+					if ( bSharedVertexPool )
+					{
+						// Using a shared vertex pool, so just copy the index
+						vecIndices[ j ] = uiIndex;
+					}
 					else
-						*pMax = *pMax + ( 255 - uiWeightsSum );
+					{
+						// Not using shared pool, need to increase index by the last vertex id
+						if ( !bIsTriangleStrip || uiIndex != 0xFFFF ) vecIndices[ j ] = uiIndex + uiStartVertex;
+						else vecIndices[ j ] = 0xFFFF;
+					}
 				}
 
-				vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? uiWeight1 : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
-				vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? uiWeight2 : 0;
-				vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? uiWeight3 : 0;
-				vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? uiWeight4 : 0;
+				// Count vertices
+				T2RedBlackTree<TUINT16> treeUsedVertices;
+				for ( TUINT j = 0; j < uiNumIndicesOrig; j++ )
+				{
+					TUINT16 uiIndex = *(TUINT16*)( &*( pGltfDataIndex + ( uiIndexBufferStride * j ) + gltfIndexAccessor.byteOffset ) );
+					if ( bIsTriangleStrip && uiIndex == 0xFFFF ) continue;
 
-				j += 1;
+					if ( treeUsedVertices.Find( uiIndex ) == treeUsedVertices.End() ) treeUsedVertices.Insert( uiIndex );
+				}
+
+				// Setup vertices
+				const TUINT uiNumVerticesOrig = treeUsedVertices.Size();
+				vecVertices.SetSize( uiStartVertex + uiNumVerticesOrig );
+
+				TASSERT( gltfPositionAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
+				TASSERT( gltfPositionAccessor.type == TINYGLTF_TYPE_VEC3 );
+				auto        pGltfDataPosition      = gltfPositionBuffer.data.begin() + gltfPositionBufferView.byteOffset;
+				const TUINT uiPositionBufferStride = ( gltfPositionBufferView.byteStride != 0 ) ? gltfPositionBufferView.byteStride : sizeof( TVector3 );
+
+				TASSERT( gltfNormalAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
+				TASSERT( gltfNormalAccessor.type == TINYGLTF_TYPE_VEC3 );
+				auto        pGltfDataNormal      = gltfNormalBuffer.data.begin() + gltfNormalBufferView.byteOffset;
+				const TUINT uiNormalBufferStride = ( gltfNormalBufferView.byteStride != 0 ) ? gltfNormalBufferView.byteStride : sizeof( TVector3 );
+
+				TASSERT( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT || gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
+				TASSERT( gltfWeightsAccessor.type == TINYGLTF_TYPE_VEC4 );
+				auto        pGltfDataWeights      = gltfWeightsBuffer.data.begin() + gltfWeightsBufferView.byteOffset;
+				const TUINT uiWeightsBufferStride = ( gltfWeightsBufferView.byteStride != 0 ) ? gltfWeightsBufferView.byteStride : ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ? sizeof( TVector4 ) : sizeof( TUINT32 ) );
+
+				TASSERT( gltfJointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE );
+				TASSERT( gltfJointsAccessor.type == TINYGLTF_TYPE_VEC4 );
+				auto        pGltfDataJoints      = gltfJointsBuffer.data.begin() + gltfJointsBufferView.byteOffset;
+				const TUINT uiJointsBufferStride = ( gltfJointsBufferView.byteStride != 0 ) ? gltfJointsBufferView.byteStride : sizeof( TUINT32 );
+
+				TASSERT( gltfUVAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT );
+				TASSERT( gltfUVAccessor.type == TINYGLTF_TYPE_VEC2 );
+				auto        pGltfDataUV      = gltfUVBuffer.data.begin() + gltfUVBufferView.byteOffset;
+				const TUINT uiUVBufferStride = ( gltfUVBufferView.byteStride != 0 ) ? gltfUVBufferView.byteStride : sizeof( TVector2 );
+
+				// Build vertices
+				TUINT             j = uiStartVertex;
+				T2Map<TINT, TINT> mapUsedBones;
+				T2_FOREACH( treeUsedVertices, itVertex )
+				{
+					TUINT16 m = *itVertex;
+
+					vecVertices[ j ].Position = *(TVector3*)( &*( pGltfDataPosition + ( uiPositionBufferStride * m ) + gltfPositionAccessor.byteOffset ) );
+					vecVertices[ j ].Normal   = *(TVector3*)( &*( pGltfDataNormal + ( uiNormalBufferStride * m ) + gltfNormalAccessor.byteOffset ) );
+					vecVertices[ j ].UV       = *(TVector2*)( &*( pGltfDataUV + ( uiUVBufferStride * m ) + gltfUVAccessor.byteOffset ) );
+
+					TUINT8* pJoints = (TUINT8*)( &*( pGltfDataJoints + ( uiJointsBufferStride * m ) + gltfJointsAccessor.byteOffset ) );
+
+					TINT iBoneIndex1 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 0 ] ] ]->second : 0;
+					TINT iBoneIndex2 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 1 ] ] ]->second : 0;
+					TINT iBoneIndex3 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 2 ] ] ]->second : 0;
+					TINT iBoneIndex4 = pGLTFSkin ? mapGltfBoneToTRVBone[ pGLTFSkin->joints[ pJoints[ 3 ] ] ]->second : 0;
+
+					// Read weights
+					TFLOAT flWeight1, flWeight2, flWeight3, flWeight4;
+					if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT )
+					{
+						// Read weights as floats
+						TFLOAT* pWeights = (TFLOAT*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
+
+						flWeight1 = pWeights[ 0 ];
+						flWeight2 = pWeights[ 1 ];
+						flWeight3 = pWeights[ 2 ];
+						flWeight4 = pWeights[ 3 ];
+					}
+					else if ( gltfWeightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE )
+					{
+						// Read weights as TUINT8 bytes
+						TUINT8* pWeights = (TUINT8*)( &*( pGltfDataWeights + ( uiWeightsBufferStride * m ) + gltfWeightsAccessor.byteOffset ) );
+
+						flWeight1 = pWeights[ 0 ] / 255.0f;
+						flWeight2 = pWeights[ 1 ] / 255.0f;
+						flWeight3 = pWeights[ 2 ] / 255.0f;
+						flWeight4 = pWeights[ 3 ] / 255.0f;
+					}
+
+					const TBOOL bHasSpaceForBones = mapUsedBones.Size() < SKINNED_SUBMESH_MAX_BONES;
+					const TBOOL bBoneAnimated1    = flWeight1 >= ( 1.0f / 255.0f ) && pJoints[ 0 ];
+					const TBOOL bBoneAnimated2    = flWeight2 >= ( 1.0f / 255.0f ) && pJoints[ 1 ];
+					const TBOOL bBoneAnimated3    = flWeight3 >= ( 1.0f / 255.0f ) && pJoints[ 2 ];
+					const TBOOL bBoneAnimated4    = flWeight4 >= ( 1.0f / 255.0f ) && pJoints[ 3 ];
+
+					if ( bHasSpaceForBones && bBoneAnimated1 && mapUsedBones.Find( iBoneIndex1 ) == mapUsedBones.End() )
+					{
+						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex1;
+						mapUsedBones.Insert( iBoneIndex1, mapUsedBones.Size() );
+					}
+
+					if ( bHasSpaceForBones && bBoneAnimated2 && mapUsedBones.Find( iBoneIndex2 ) == mapUsedBones.End() )
+					{
+						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex2;
+						mapUsedBones.Insert( iBoneIndex2, mapUsedBones.Size() );
+					}
+
+					if ( bHasSpaceForBones && bBoneAnimated3 && mapUsedBones.Find( iBoneIndex3 ) == mapUsedBones.End() )
+					{
+						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex3;
+						mapUsedBones.Insert( iBoneIndex3, mapUsedBones.Size() );
+					}
+
+					if ( bHasSpaceForBones && bBoneAnimated4 && mapUsedBones.Find( iBoneIndex4 ) == mapUsedBones.End() )
+					{
+						pSubMesh->aBones[ mapUsedBones.Size() ] = iBoneIndex4;
+						mapUsedBones.Insert( iBoneIndex4, mapUsedBones.Size() );
+					}
+
+					TBOOL bNoBoneAnimated = !bBoneAnimated1 && !bBoneAnimated2 && !bBoneAnimated3 && !bBoneAnimated4;
+
+					vecVertices[ j ].Bones[ 0 ] = bBoneAnimated1 ? ( mapUsedBones[ iBoneIndex1 ]->second * 3 ) : 0;
+					vecVertices[ j ].Bones[ 1 ] = bBoneAnimated2 ? ( mapUsedBones[ iBoneIndex2 ]->second * 3 ) : 0;
+					vecVertices[ j ].Bones[ 2 ] = bBoneAnimated3 ? ( mapUsedBones[ iBoneIndex3 ]->second * 3 ) : 0;
+					vecVertices[ j ].Bones[ 3 ] = bBoneAnimated4 ? ( mapUsedBones[ iBoneIndex4 ]->second * 3 ) : 0;
+
+					TUINT8 uiWeight1 = TUINT8( TMath::Round( flWeight1 * 255.0f ) );
+					TUINT8 uiWeight2 = TUINT8( TMath::Round( flWeight2 * 255.0f ) );
+					TUINT8 uiWeight3 = TUINT8( TMath::Round( flWeight3 * 255.0f ) );
+					TUINT8 uiWeight4 = TUINT8( TMath::Round( flWeight4 * 255.0f ) );
+
+					// Normalize weights
+					TUINT16 uiWeightsSum = uiWeight1 + uiWeight2 + uiWeight3 + uiWeight4;
+					if ( uiWeightsSum != 255 )
+					{
+						TUINT8* pMax = &uiWeight1;
+
+						if ( *pMax < uiWeight2 ) pMax = &uiWeight2;
+						if ( *pMax < uiWeight3 ) pMax = &uiWeight3;
+						if ( *pMax < uiWeight4 ) pMax = &uiWeight4;
+
+						// TODO: distribute across all?
+						if ( uiWeightsSum > 255 )
+							*pMax = *pMax - ( uiWeightsSum - 255 );
+						else
+							*pMax = *pMax + ( 255 - uiWeightsSum );
+					}
+
+					vecVertices[ j ].Weights[ 0 ] = bBoneAnimated1 ? uiWeight1 : ( bNoBoneAnimated ? 255 : 0 ); // stick to the main bone, if no bones are used for this submesh
+					vecVertices[ j ].Weights[ 1 ] = bBoneAnimated2 ? uiWeight2 : 0;
+					vecVertices[ j ].Weights[ 2 ] = bBoneAnimated3 ? uiWeight3 : 0;
+					vecVertices[ j ].Weights[ 3 ] = bBoneAnimated4 ? uiWeight4 : 0;
+
+					j += 1;
+				}
+
+				// Need to manually delete all elements
+				treeUsedVertices.DeleteAll();
+
+				TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Too many bones per mesh (> 28) - split the mesh in your editing tool!!!" );
+
+				T2VertexArray::Unbind();
+
+				// Setup submesh data
+				PrimitiveGroup* pPrims       = NULL;
+				TUINT16*        pIndices     = vecIndices.Begin();
+				TUINT           uiNumIndices = vecIndices.Size();
+
+				if ( gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES )
+				{
+					//SetListsOnly( TTRUE );
+
+					// Generate triangle strips
+					TUINT16 iNumPrims;
+					TBOOL   bResult = GenerateStrips( &vecIndices[ 0 ], vecIndices.Size(), &pPrims, &iNumPrims );
+					TASSERT( bResult == TTRUE );
+					TASSERT( iNumPrims == 1 );
+					vecIndices.FreeMemory();
+
+					pIndices     = pPrims->indices;
+					uiNumIndices = pPrims->numIndices;
+				}
+
+				pSubMesh->uiNumIndices  = uiNumIndices;
+				pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pIndices, uiNumIndices, GL_STATIC_DRAW );
+				pSubMesh->uiEndVertexId = uiStartVertex + uiNumVerticesOrig;
+				pSubMesh->uiNumBones    = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size(); // prevent meshes that don't use bones from disappearing
+
+				// Clean NvTriStrip's object
+				if ( pPrims )
+				{
+					delete[] pPrims;
+					pPrims = TNULL;
+				}
+
+				pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
+				pSubMesh->oVertexArray.Bind();
+				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Position ) );
+				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Normal ) );
+				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Weights ), GL_TRUE );
+				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Bones ), GL_TRUE );
+				pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 4, 2, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, UV ) );
 			}
 
-			// Need to manually delete all elements
-			treeUsedVertices.DeleteAll();
+			TASSERT( pMesh->vecSubMeshes.Size() > 0 );
+			auto pHeadSubMesh = pMesh->vecSubMeshes.Front();
 
-			TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Too many bones per mesh (> 28) - split the mesh in your editing tool!!!" );
+			// Send vertex data to the GPU
+			pMesh->oVertexBuffer.SetData( vecVertices.Begin(), vecVertices.Size() * sizeof( SkinMesh::SkinVertex ), GL_STATIC_DRAW );
+			pHeadSubMesh->uiNumAllocatedVertices = vecVertices.Size();
 
-			T2VertexArray::Unbind();
-
-			// Setup submesh data
-			PrimitiveGroup* pPrims       = NULL;
-			TUINT16*        pIndices     = vecIndices.Begin();
-			TUINT           uiNumIndices = vecIndices.Size();
-
-			if ( gltfPrimitive.mode == TINYGLTF_MODE_TRIANGLES )
-			{
-				//SetListsOnly( TTRUE );
-
-				// Generate triangle strips
-				TUINT16         iNumPrims;
-				TBOOL           bResult = GenerateStrips( &vecIndices[ 0 ], vecIndices.Size(), &pPrims, &iNumPrims );
-				TASSERT( bResult == TTRUE );
-				TASSERT( iNumPrims == 1 );
-				vecIndices.FreeMemory();
-
-				pIndices     = pPrims->indices;
-				uiNumIndices = pPrims->numIndices;
-			}
-
-			pSubMesh->uiNumIndices      = uiNumIndices;
-			pSubMesh->oIndexBuffer      = T2Render::CreateIndexBuffer( pIndices, uiNumIndices, GL_STATIC_DRAW );
-			pSubMesh->uiEndVertexId     = uiStartVertex + uiNumVerticesOrig;
-			pSubMesh->uiNumBones        = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size(); // prevent meshes that don't use bones from disappearing
-
-			// Clean NvTriStrip's object
-			if ( pPrims )
-			{
-				delete[] pPrims;
-				pPrims = TNULL;
-			}
-
-			pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
-			pSubMesh->oVertexArray.Bind();
-			pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Position ) );
-			pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Normal ) );
-			pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Weights ), GL_TRUE );
-			pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 4, GL_UNSIGNED_BYTE, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, Bones ), GL_TRUE );
-			pSubMesh->oVertexArray.GetVertexBuffer().SetAttribPointer( 4, 2, GL_FLOAT, sizeof( SkinMesh::SkinVertex ), offsetof( SkinMesh::SkinVertex, UV ) );
+			for ( TINT v = 0; v < TINT( vecVertices.Size() ); v++ )
+				vecLODPositions.PushBack( vecVertices[ v ].Position );
 		}
-		
-		TASSERT( pMesh->vecSubMeshes.Size() > 0 );
-		auto pHeadSubMesh = pMesh->vecSubMeshes.Front();
-		
-		// Send vertex data to the GPU
-		pMesh->oVertexBuffer.SetData( vecVertices.Begin(), vecVertices.Size() * sizeof( SkinMesh::SkinVertex ), GL_STATIC_DRAW );
-		pHeadSubMesh->uiNumAllocatedVertices = vecVertices.Size();
+
+		if ( !vecLODPositions.IsEmpty() )
+			pModel->aLODs[ iLODIdx ].BoundingSphere = ModelLoader_ComputeBoundingSphere( vecLODPositions );
 	}
 
 	return pModel;
@@ -803,12 +1065,15 @@ void ResourceLoader::ModelLoader_SetTKLBuilder( TKLBuilder* pTKLBuilder )
 ResourceLoader::Model::Model()
 {
 	iLODCount           = 0;
+	fRenderDistance     = 50.0f;
 	iNumCollisionMeshes = 0;
 	pSkeleton           = TNULL;
 	pCollisionMeshes    = TNULL;
 	pTRB                = TNULL;
 
 	eModelType = ModelType::None;
+
+	ModelLoader_InitLODDistances( aLODDistances );
 }
 
 ResourceLoader::Model::~Model()

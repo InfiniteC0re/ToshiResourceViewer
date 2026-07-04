@@ -3,6 +3,7 @@
 #include "Shader/Mesh.h"
 #include "Shader/RendererSettings.h"
 #include "Application.h"
+#include "Serializer/CollisionTreeBuilder.h"
 
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
@@ -25,7 +26,7 @@ TOSHI_NAMESPACE_USING
 
 ModelResourceView::ModelResourceView()
     : m_vecCameraCenter( TVector4::VEC_ZERO )
-	, m_fCameraDistance( 2.0f )
+    , m_fCameraDistance( 2.0f )
     , m_fCameraDistanceTarget( 2.0f )
     , m_fCameraFOV( 90.0f )
     , m_fCameraRotX( 0.0f )
@@ -109,7 +110,7 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 	m_ModelInstance.oTransform.SetMatrix( TMatrix44::IDENTITY );
 	m_ModelInstance.oTransform.SetEuler( TVector3( TMath::DegToRad( -90.0f ), 0.0f, 0.0f ) );
 	m_ModelInstance.oTransform.SetTranslate( TVector3::VEC_ZERO );
-	
+
 	return TRBResourceView::OnCreate( pchFilePath ) && m_ModelInstance.pModel.IsValid() && ( TryFixingMissingTKL(), TTRUE );
 }
 
@@ -129,7 +130,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	if ( m_bAutoSaveTKL )
 	{
 		// Save TKL
-		PTRB* pTKLTRB       = new PTRB( pOutTRB->GetEndianess() );
+		PTRB* pTKLTRB    = new PTRB( pOutTRB->GetEndianess() );
 		auto  pMemStream = pTKLTRB->GetSections()->CreateStream();
 
 		OnSaveTKL( pTKLTRB );
@@ -138,45 +139,46 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	}
 
 	PTRBSections* pSECT = pOutTRB->GetSections();
-	PTRBSymbols* pSYMB = pOutTRB->GetSymbols();
+	PTRBSymbols*  pSYMB = pOutTRB->GetSymbols();
 
 	PTRBSections::MemoryStream* pMemStream = pSECT->GetStack( 0 );
 
 	// Allocate FileHeader symbol
-	auto pTRBFileHeader = pMemStream->Alloc<TTMDBase::FileHeader>();
-	pTRBFileHeader->m_uiMagic = pOutTRB->ConvertEndianess( TFourCC( "TMDL" ) );
-	pTRBFileHeader->m_uiZero1 = pOutTRB->ConvertEndianess( 0 );
+	auto pTRBFileHeader              = pMemStream->Alloc<TTMDBase::FileHeader>();
+	pTRBFileHeader->m_uiMagic        = pOutTRB->ConvertEndianess( TFourCC( "TMDL" ) );
+	pTRBFileHeader->m_uiZero1        = pOutTRB->ConvertEndianess( 0 );
 	pTRBFileHeader->m_uiVersionMajor = pOutTRB->ConvertEndianess( TTMD_VERSION_MAJOR );
 	pTRBFileHeader->m_uiVersionMinor = pOutTRB->ConvertEndianess( TTMD_VERSION_MINOR );
-	pTRBFileHeader->m_uiZero2 = pOutTRB->ConvertEndianess( 0 );
+	pTRBFileHeader->m_uiZero2        = pOutTRB->ConvertEndianess( 0 );
 	pSYMB->Add( pMemStream, "FileHeader", pTRBFileHeader.get() );
 
 	// Allocate SkeletonHeader symbol
-	auto pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
-	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, m_ModelInstance.pModel->oSkeletonHeader.m_szTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
-	pTRBSkeletonHeader->m_iTKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumTranslations() );
-	pTRBSkeletonHeader->m_iQKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumQuaternions() );
-	pTRBSkeletonHeader->m_iSKeyCount  = pOutTRB->ConvertEndianess( pKeyLib->GetNumScales() ); // Barnyard does not support scale keyframes
-	pTRBSkeletonHeader->m_iTBaseIndex = pOutTRB->ConvertEndianess( 0 );
-	pTRBSkeletonHeader->m_iQBaseIndex = pOutTRB->ConvertEndianess( 0 );
-	pTRBSkeletonHeader->m_iSBaseIndex = pOutTRB->ConvertEndianess( 0 ); // Barnyard does not support scale keyframes
+	auto        pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
+	const auto& rSkeletonHeader    = m_ModelInstance.pModel->oSkeletonHeader;
+	T2String8::Copy( pTRBSkeletonHeader->m_szTKLName, rSkeletonHeader.m_szTKLName, sizeof( pTRBSkeletonHeader->m_szTKLName ) - 1 );
+	pTRBSkeletonHeader->m_iTKeyCount  = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iTKeyCount );
+	pTRBSkeletonHeader->m_iQKeyCount  = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iQKeyCount );
+	pTRBSkeletonHeader->m_iSKeyCount  = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iSKeyCount );
+	pTRBSkeletonHeader->m_iTBaseIndex = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iTBaseIndex );
+	pTRBSkeletonHeader->m_iQBaseIndex = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iQBaseIndex );
+	pTRBSkeletonHeader->m_iSBaseIndex = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iSBaseIndex );
 	pSYMB->Add( pMemStream, "SkeletonHeader", pTRBSkeletonHeader.get() );
 
 	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
-	TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
+	TSkeleton*         pSkeleton         = pSkeletonInstance->GetSkeleton();
 
 	// Allocate Skeleton symbol
 	const TINT iNumBones = pSkeleton->m_iBoneCount;
-	const TINT iNumSeq = pSkeleton->m_iSequenceCount;
+	const TINT iNumSeq   = pSkeleton->m_iSequenceCount;
 
-	auto pTRBSkeleton = pMemStream->Alloc<TSkeleton>();
-	pTRBSkeleton->m_iBoneCount = pOutTRB->ConvertEndianess( iNumBones );
-	pTRBSkeleton->m_iManualBoneCount = pOutTRB->ConvertEndianess( pSkeleton->m_iManualBoneCount );
-	pTRBSkeleton->m_iSequenceCount = pOutTRB->ConvertEndianess( iNumSeq );
+	auto pTRBSkeleton                  = pMemStream->Alloc<TSkeleton>();
+	pTRBSkeleton->m_iBoneCount         = pOutTRB->ConvertEndianess( iNumBones );
+	pTRBSkeleton->m_iManualBoneCount   = pOutTRB->ConvertEndianess( pSkeleton->m_iManualBoneCount );
+	pTRBSkeleton->m_iSequenceCount     = pOutTRB->ConvertEndianess( iNumSeq );
 	pTRBSkeleton->m_iAnimationMaxCount = pOutTRB->ConvertEndianess( pSkeleton->m_iAnimationMaxCount );
-	pTRBSkeleton->m_iInstanceCount = pOutTRB->ConvertEndianess( 0 );
-	pTRBSkeleton->m_eQuatLerpType = pOutTRB->ConvertEndianess( TSkeleton::QUATINTERP_Default );
-	
+	pTRBSkeleton->m_iInstanceCount     = pOutTRB->ConvertEndianess( 0 );
+	pTRBSkeleton->m_eQuatLerpType      = pOutTRB->ConvertEndianess( TSkeleton::QUATINTERP_Default );
+
 	// Copy info about the bones
 	pMemStream->Alloc<TSkeletonBone>( &pTRBSkeleton->m_pBones, iNumBones );
 	for ( TINT i = 0; i < iNumBones; i++ )
@@ -186,12 +188,12 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	auto pTRBSkeletonSeq = pMemStream->Alloc<TSkeletonSequence>( &pTRBSkeleton->m_SkeletonSequences, iNumSeq );
 	for ( TINT i = 0; i < iNumSeq; i++ )
 	{
-		auto pSeq = pSkeleton->GetSequence( i );
+		auto pSeq    = pSkeleton->GetSequence( i );
 		auto pTRBSeq = pTRBSkeletonSeq + i;
 
 		pTRBSeq->m_iNameLength = pOutTRB->ConvertEndianess( pSeq->m_iNameLength );
 		T2String8::Copy( pTRBSeq->m_szName, pSeq->m_szName, sizeof( pTRBSeq->m_szName ) - 1 );
-		
+
 		pTRBSeq->m_eFlags        = pOutTRB->ConvertEndianess( pSeq->m_eFlags );
 		pTRBSeq->m_eMode         = pOutTRB->ConvertEndianess( pSeq->m_eMode );
 		pTRBSeq->m_iNumUsedBones = pOutTRB->ConvertEndianess( pSeq->m_iNumUsedBones );
@@ -201,23 +203,23 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 		auto pTRBSeqBones = pMemStream->Alloc<TSkeletonSequenceBone>( &pTRBSeq->m_pSeqBones, iNumBones );
 		for ( TINT k = 0; k < iNumBones; k++ )
 		{
-			auto pSeqBone = &pSeq->m_pSeqBones[ k ];
+			auto pSeqBone    = &pSeq->m_pSeqBones[ k ];
 			auto pTRBSeqBone = pTRBSeqBones + k;
 
 			const TINT iKeySize = pSeqBone->m_iKeySize;
 			const TINT iNumKeys = pSeqBone->m_iNumKeys;
 
 			TASSERT( iKeySize == 4 || iKeySize == 6 ); // time, quaternion (+ translation sometimes)
-			pTRBSeqBone->m_eFlags = pOutTRB->ConvertEndianess( pSeqBone->m_eFlags );
+			pTRBSeqBone->m_eFlags   = pOutTRB->ConvertEndianess( pSeqBone->m_eFlags );
 			pTRBSeqBone->m_iKeySize = pOutTRB->ConvertEndianess( iKeySize );
 			pTRBSeqBone->m_iNumKeys = pOutTRB->ConvertEndianess( iNumKeys );
-			
+
 			// Copy keyframe data
 			pMemStream->Alloc<TBYTE>( &pTRBSeqBone->m_pData, iKeySize * iNumKeys );
 
 			for ( TINT j = 0; j < iNumKeys; j++ )
 			{
-				TUINT16* pKeyData = pSeqBone->GetKey( j );
+				TUINT16* pKeyData    = pSeqBone->GetKey( j );
 				TUINT16* pTRBKeyData = pTRBSeqBone->GetKey( j );
 
 				pTRBKeyData[ 0 ] = pOutTRB->ConvertEndianess( pKeyData[ 0 ] );
@@ -231,7 +233,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 
 	// Allocate Materials symbol
 	T2Map<TPString8, TString8, TPString8::Comparator> mapMaterials;
-	auto pTRBMaterialsHeader = pMemStream->Alloc<TTMDBase::MaterialsHeader>();
+	auto                                              pTRBMaterialsHeader = pMemStream->Alloc<TTMDBase::MaterialsHeader>();
 
 	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
 
@@ -261,7 +263,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	pTRBMaterialsHeader->iNumMaterials = pOutTRB->ConvertEndianess( iNumMaterials );
 	pTRBMaterialsHeader->uiSectionSize = pOutTRB->ConvertEndianess( sizeof( TTMDBase::Material ) * iNumMaterials );
 
-	auto pTRBMaterials = pMemStream->Alloc<TTMDBase::Material>( iNumMaterials );
+	auto pTRBMaterials   = pMemStream->Alloc<TTMDBase::Material>( iNumMaterials );
 	TINT iNumWrittenMats = 0;
 	T2_FOREACH( mapMaterials, it )
 	{
@@ -276,18 +278,87 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	pSYMB->Add( pMemStream, "Materials", pTRBMaterialsHeader.get() );
 
 	// Write collision
-	// NOTE: we don't support collision at the moment
-	auto pTRBCollision = pMemStream->Alloc<TTMDBase::CollisionHeader>();
-	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( 0 );
+	auto pTRBCollision          = pMemStream->Alloc<TTMDBase::CollisionHeader>();
+	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( pModel->iNumCollisionMeshes );
+
+	if ( pModel->iNumCollisionMeshes > 0 )
+	{
+		auto pTRBCollisionMeshes = pMemStream->Alloc<TTMDBase::CollisionMesh>( &pTRBCollision->m_pMeshes, pModel->iNumCollisionMeshes );
+
+		for ( TINT i = 0; i < pModel->iNumCollisionMeshes; i++ )
+		{
+			auto& rCollisionMesh = pModel->pCollisionMeshes[ i ];
+			auto  pTRBMesh       = pTRBCollisionMeshes + i;
+
+			const TUINT uiNumVertices = rCollisionMesh.vecVertices.Size();
+			const TUINT uiNumIndices  = rCollisionMesh.vecIndices.Size();
+			const TUINT uiNumGroups   = rCollisionMesh.vecGroups.Size();
+
+			pTRBMesh->m_iBoneID        = pOutTRB->ConvertEndianess( rCollisionMesh.iBoneID );
+			pTRBMesh->m_uiNumVertices  = pOutTRB->ConvertEndianess( uiNumVertices );
+			pTRBMesh->m_uiNumIndices   = pOutTRB->ConvertEndianess( uiNumIndices );
+			pTRBMesh->m_uiNumCollTypes = pOutTRB->ConvertEndianess( uiNumGroups );
+
+			auto pTRBVertices = pMemStream->Alloc<TVector3>( &pTRBMesh->m_pVertices, uiNumVertices );
+			for ( TUINT k = 0; k < uiNumVertices; k++ )
+			{
+				auto pTRBVertex = pTRBVertices + k;
+				pTRBVertex->x   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].x );
+				pTRBVertex->y   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].y );
+				pTRBVertex->z   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].z );
+			}
+
+			auto pTRBIndices = pMemStream->Alloc<TUINT16>( &pTRBMesh->m_pIndices, uiNumIndices );
+			for ( TUINT k = 0; k < uiNumIndices; k++ )
+			{
+				*( pTRBIndices + k ) = pOutTRB->ConvertEndianess( rCollisionMesh.vecIndices[ k ] );
+			}
+
+			auto pTRBGroups = pMemStream->Alloc<TTMDBase::CollisionGroup>( &pTRBMesh->m_pCollGroups, uiNumGroups );
+			for ( TUINT k = 0; k < uiNumGroups; k++ )
+			{
+				auto& rCollisionGroup = rCollisionMesh.vecGroups[ k ];
+				auto  pTRBGroup       = pTRBGroups + k;
+
+				const TUINT uiNameLength = rCollisionGroup.strName.Length() + 1;
+				auto        pTRBName     = pMemStream->AllocBytes( uiNameLength );
+				T2String8::Copy( pTRBName.get(), rCollisionGroup.strName.GetString(), uiNameLength );
+				pMemStream->WritePointer( const_cast<TCHAR**>( &pTRBGroup->pszName ), pTRBName );
+
+				pTRBGroup->iUnk1      = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->iUnk3      = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->uiNumFaces = pOutTRB->ConvertEndianess( rCollisionGroup.uiNumFaces );
+				pTRBGroup->iSomeCount = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->pS1        = TNULL;
+			}
+		}
+	}
+	else
+	{
+		pTRBCollision->m_pMeshes = TNULL;
+	}
 
 	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
+
+	// Bake the collision tree - the engine expects it prebaked. Models only ever
+	// have a single collision mesh
+	if ( pModel->iNumCollisionMeshes > 0 )
+	{
+		auto& rMesh = pModel->pCollisionMeshes[ 0 ];
+		if ( rMesh.vecVertices.Size() > 0 && rMesh.vecIndices.Size() >= 6 )
+			CollisionTreeBuilder::WriteCollisionTree(
+			    pOutTRB, pMemStream, pSYMB,
+			    &rMesh.vecVertices[ 0 ], rMesh.vecVertices.Size(),
+			    &rMesh.vecIndices[ 0 ], rMesh.vecIndices.Size()
+			);
+	}
 
 	// Write the main TTMD header (Windows) and information about the LODs
 	const TINT iNumLODs = pModel->iLODCount;
 
-	auto pTRBWinHeader = pMemStream->Alloc<TTMDWin::TRBWinHeader>();
+	auto pTRBWinHeader            = pMemStream->Alloc<TTMDWin::TRBWinHeader>();
 	pTRBWinHeader->m_iNumLODs     = pOutTRB->ConvertEndianess( iNumLODs );
-	pTRBWinHeader->m_fLODDistance = pOutTRB->ConvertEndianess( pModel->aLODDistances[ 0 ] );
+	pTRBWinHeader->m_fLODDistance = pOutTRB->ConvertEndianess( pModel->fRenderDistance );
 
 	auto pTRBLODs = pMemStream->Alloc<TTMDWin::TRBLODHeader>( iNumLODs );
 	for ( TINT i = 0; i < iNumLODs; i++ )
@@ -368,7 +439,7 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 		ImGui::DockBuilderDockWindow( m_strSequencesId.Get(), m_DockLeft );
 		ImGui::DockBuilderDockWindow( m_strPreferencesId.Get(), m_DockLeftBottom );
 		ImGui::DockBuilderDockWindow( m_strViewportId.Get(), m_DockRight );
-		
+
 		ImGui::DockBuilderFinish( dockSpaceID );
 		m_bDockingSetUp = TTRUE;
 	}
@@ -736,10 +807,10 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 	tinygltf::Scene  gltfScene;
 
 	tinygltf::Node gltfRootNode;
-	gltfRootNode.name = "Model";
+	gltfRootNode.name       = "Model";
 	TINT iCollisionRootNode = -1;
 	TINT iSkeletonRootNode  = -1;
-	
+
 	//TQuaternion quatRotation;
 	//quatRotation.SetFromEulerRollPitchYaw( TMath::DegToRad( -90.0f ), 0.0f, 0.0f );
 	//gltfRootNode.rotation = { quatRotation.x, quatRotation.y, quatRotation.z, quatRotation.w };
@@ -764,8 +835,8 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 		const TINT iBaseBoneIndex = TINT( gltfModel.nodes.size() );
 		for ( TINT i = 0; i < pSkeleton->GetBoneCount(); i++ )
 		{
-			TSkeletonBone* pBone = pSkeleton->GetBone( i );
-			const TINT iParentBone = pBone->GetParentBone();
+			TSkeletonBone* pBone       = pSkeleton->GetBone( i );
+			const TINT     iParentBone = pBone->GetParentBone();
 
 			// Copy inverse transform of the bone to the inverse bind matrix buffer
 			gltfIBMBuffer.data.insert( gltfIBMBuffer.data.end(), (TBYTE*)&pBone->GetTransformInv(), (TBYTE*)( &pBone->GetTransformInv() + 1 ) );
@@ -778,8 +849,8 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 			if ( iParentBone != -1 )
 			{
 				matBoneLocal.Multiply(
-					pSkeleton->GetBone( iParentBone )->GetTransformInv(),
-					pBone->GetTransform()
+				    pSkeleton->GetBone( iParentBone )->GetTransformInv(),
+				    pBone->GetTransform()
 				);
 			}
 			else
@@ -791,7 +862,7 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 			TMatrix44::MatToQuat( quatBoneRotation, matBoneLocal );
 
 			gltfBoneNode.translation = { matBoneLocal.m_f41, matBoneLocal.m_f42, matBoneLocal.m_f43 };
-			gltfBoneNode.rotation = { quatBoneRotation.x, quatBoneRotation.y, quatBoneRotation.z, quatBoneRotation.w };
+			gltfBoneNode.rotation    = { quatBoneRotation.x, quatBoneRotation.y, quatBoneRotation.z, quatBoneRotation.w };
 
 			gltfModel.nodes.push_back( std::move( gltfBoneNode ) );
 			const TINT iBoneIndex = gltfModel.nodes.size() - 1;
@@ -820,7 +891,7 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 
 		// Inverse bind buffer view
 		tinygltf::BufferView gltfIBMBufferView;
-		gltfIBMBufferView.buffer = iIBMBufferIndex;
+		gltfIBMBufferView.buffer     = iIBMBufferIndex;
 		gltfIBMBufferView.byteLength = sizeof( TMatrix44 ) * pSkeleton->GetBoneCount();
 
 		gltfModel.bufferViews.push_back( gltfIBMBufferView );
@@ -828,10 +899,10 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 
 		// Inverse bind buffer accessor
 		tinygltf::Accessor gltfAccIBM;
-		gltfAccIBM.bufferView = iIBMBufferViewIndex;
+		gltfAccIBM.bufferView    = iIBMBufferViewIndex;
 		gltfAccIBM.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-		gltfAccIBM.type = TINYGLTF_TYPE_MAT4;
-		gltfAccIBM.count = pSkeleton->GetBoneCount();
+		gltfAccIBM.type          = TINYGLTF_TYPE_MAT4;
+		gltfAccIBM.count         = pSkeleton->GetBoneCount();
 
 		gltfModel.accessors.push_back( std::move( gltfAccIBM ) );
 		const TINT iAccIBMIndex = TINT( gltfModel.accessors.size() - 1 );
@@ -1037,14 +1108,13 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 			TBOOL bSerialized = pMesh->SerializeGLTFMesh( gltfModel, m_ModelInstance.pSkeletonInstance );
 			TASSERT( bSerialized == TTRUE );
 		}
-		
+
 		TSIZE uiEndMesh = gltfModel.nodes.size();
 
 		for ( TSIZE i = uiStartMesh; i < uiEndMesh; i++ )
 		{
 			gltfRootNode.children.push_back( TINT( i ) );
 		}
-		
 	}
 
 	//-----------------------------------------------------------------------------
@@ -1057,7 +1127,7 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 
 		if ( pCollisionHeader )
 		{
-			const TINT iNumCollisionMeshes = m_pTRB->ConvertEndianess( pCollisionHeader->m_iNumMeshes );
+			const TINT            iNumCollisionMeshes = m_pTRB->ConvertEndianess( pCollisionHeader->m_iNumMeshes );
 			T2DynamicVector<TINT> vecCollisionNodes;
 
 			auto fnGetCollisionMaterial = [ &gltfModel ]( const TCHAR* pchGroupName ) -> TINT {
@@ -1067,10 +1137,10 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 				if ( iMaterialIndex == -1 )
 				{
 					tinygltf::Material gltfMaterial;
-					gltfMaterial.name = strMaterialName.GetString();
+					gltfMaterial.name                                 = strMaterialName.GetString();
 					gltfMaterial.pbrMetallicRoughness.baseColorFactor = { 0.0, 0.75, 1.0, 0.35 };
-					gltfMaterial.alphaMode = "BLEND";
-					gltfMaterial.doubleSided = true;
+					gltfMaterial.alphaMode                            = "BLEND";
+					gltfMaterial.doubleSided                          = true;
 
 					gltfModel.materials.push_back( std::move( gltfMaterial ) );
 					iMaterialIndex = TINT( gltfModel.materials.size() - 1 );
@@ -1154,8 +1224,8 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 				const TINT iIndexBufferView = TINT( gltfModel.bufferViews.size() - 1 );
 
 				const TUINT uiNumCollTypes = m_pTRB->ConvertEndianess( rCollisionMesh.m_uiNumCollTypes );
-				TUINT      uiFaceOffset    = 0;
-				TBOOL      bCreatedNode    = TFALSE;
+				TUINT       uiFaceOffset   = 0;
+				TBOOL       bCreatedNode   = TFALSE;
 
 				auto fnCreateCollisionNode = [ &gltfModel, &vecCollisionNodes, &fnGetCollisionMaterial, iAccPositionIndex ]( const TCHAR* pchCollisionName, TINT iAccIndicesIndex ) {
 					const TCHAR* pchName = pchCollisionName ? pchCollisionName : "default";
@@ -1299,8 +1369,26 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 	pTMDLElem->SetAttribute( "Target", "Win" );
 	pTMDLElem->SetAttribute( "Name", m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) ).GetString() );
 	pTMDLElem->SetAttribute( "Type", ResourceLoader::GetModelTypeName( m_ModelInstance.pModel->eModelType ) );
-	pTMDLElem->SetAttribute( "LODCount", m_ModelInstance.pModel->iLODCount );
-	pTMDLElem->SetAttribute( "LODDistance", m_ModelInstance.pModel->aLODDistances[ 0 ] );
+
+	auto pLODsElem = pTMDLElem->InsertNewChildElement( "LODs" );
+
+	auto pRenderDistanceElem = pLODsElem->InsertNewChildElement( "RenderDistance" );
+	pRenderDistanceElem->SetText( m_ModelInstance.pModel->fRenderDistance );
+
+	for ( TINT i = 0; i < m_ModelInstance.pModel->iLODCount; i++ )
+	{
+		auto pLODElem = pLODsElem->InsertNewChildElement( "LOD" );
+		pLODElem->SetAttribute( "Index", i );
+		pLODElem->SetAttribute( "Distance", m_ModelInstance.pModel->aLODDistances[ i ] );
+		pLODElem->SetAttribute( "MeshCount", m_ModelInstance.pModel->aLODs[ i ].iNumMeshes );
+
+		// Store the bounding sphere so a round-trip keeps the exact original
+		const TSphere& rSphere = m_ModelInstance.pModel->aLODs[ i ].BoundingSphere;
+		pLODElem->SetAttribute( "SphereX", rSphere.GetOrigin().x );
+		pLODElem->SetAttribute( "SphereY", rSphere.GetOrigin().y );
+		pLODElem->SetAttribute( "SphereZ", rSphere.GetOrigin().z );
+		pLODElem->SetAttribute( "SphereRadius", rSphere.GetRadius() );
+	}
 
 	auto pMaterialsElem = pTMDLElem->InsertNewChildElement( "Materials" );
 
@@ -1392,7 +1480,7 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 		if ( TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance )
 		{
 			TSkeleton* pSkeleton = pSkeletonInstance->GetSkeleton();
-			const TINT iBoneId = rCollisionMesh.iBoneID;
+			const TINT iBoneId   = rCollisionMesh.iBoneID;
 
 			if ( iBoneId >= 0 && iBoneId < pSkeleton->GetBoneCount() )
 				pMeshElem->SetAttribute( "BoneName", pSkeleton->GetBone( iBoneId )->GetName() );
@@ -1417,7 +1505,59 @@ void ModelResourceView::DeserializeModelInformation( tinyxml2::XMLDocument* pInp
 	auto pTMDLElem = pInput->FirstChildElement( "TMDL" );
 	if ( !pTMDLElem ) return;
 
-	m_ModelInstance.pModel->aLODDistances[ 0 ] = pTMDLElem->FloatAttribute( "LODDistance", 30.0f );
+	if ( auto pLODsElem = pTMDLElem->FirstChildElement( "LODs" ) )
+	{
+		if ( auto pRenderDistanceElem = pLODsElem->FirstChildElement( "RenderDistance" ) )
+			m_ModelInstance.pModel->fRenderDistance = pRenderDistanceElem->FloatText( m_ModelInstance.pModel->fRenderDistance );
+
+		for ( auto pLODElem = pLODsElem->FirstChildElement( "LOD" ); pLODElem != TNULL; pLODElem = pLODElem->NextSiblingElement( "LOD" ) )
+		{
+			const TINT iLODIndex = pLODElem->IntAttribute( "Index", -1 );
+			if ( iLODIndex < 0 || iLODIndex >= 5 ) continue;
+
+			m_ModelInstance.pModel->aLODDistances[ iLODIndex ] = pLODElem->FloatAttribute( "Distance", m_ModelInstance.pModel->aLODDistances[ iLODIndex ] );
+
+			// Override the computed fallback with the stored sphere if present
+			if ( pLODElem->Attribute( "SphereRadius" ) && iLODIndex < m_ModelInstance.pModel->iLODCount )
+			{
+				m_ModelInstance.pModel->aLODs[ iLODIndex ].BoundingSphere = TSphere(
+				    pLODElem->FloatAttribute( "SphereX", 0.0f ),
+				    pLODElem->FloatAttribute( "SphereY", 0.0f ),
+				    pLODElem->FloatAttribute( "SphereZ", 0.0f ),
+				    pLODElem->FloatAttribute( "SphereRadius", 0.0f )
+				);
+			}
+		}
+	}
+	else
+	{
+		m_ModelInstance.pModel->fRenderDistance = pTMDLElem->FloatAttribute( "LODDistance", m_ModelInstance.pModel->fRenderDistance );
+	}
+
+	if ( auto pCollisionElem = pTMDLElem->FirstChildElement( "Collision" ) )
+	{
+		for ( auto pMeshElem = pCollisionElem->FirstChildElement( "Mesh" ); pMeshElem != TNULL; pMeshElem = pMeshElem->NextSiblingElement( "Mesh" ) )
+		{
+			const TINT iMeshIndex = pMeshElem->IntAttribute( "Index", -1 );
+			if ( iMeshIndex < 0 || iMeshIndex >= m_ModelInstance.pModel->iNumCollisionMeshes ) continue;
+
+			auto& rCollisionMesh   = m_ModelInstance.pModel->pCollisionMeshes[ iMeshIndex ];
+			rCollisionMesh.iBoneID = pMeshElem->IntAttribute( "Bone", rCollisionMesh.iBoneID );
+
+			TINT iGroupIndex = 0;
+			for ( auto pGroupElem = pMeshElem->FirstChildElement( "Group" ); pGroupElem != TNULL; pGroupElem = pGroupElem->NextSiblingElement( "Group" ) )
+			{
+				if ( iGroupIndex >= rCollisionMesh.vecGroups.Size() ) break;
+
+				const TCHAR* pchName = TNULL;
+				pGroupElem->QueryStringAttribute( "Name", &pchName );
+				if ( pchName ) rCollisionMesh.vecGroups[ iGroupIndex ].strName = pchName;
+
+				rCollisionMesh.vecGroups[ iGroupIndex ].uiNumFaces = pGroupElem->UnsignedAttribute( "Faces", rCollisionMesh.vecGroups[ iGroupIndex ].uiNumFaces );
+				iGroupIndex += 1;
+			}
+		}
+	}
 
 	auto pSkeletonElem = pTMDLElem->FirstChildElement( "TSkeleton" );
 	if ( TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance )

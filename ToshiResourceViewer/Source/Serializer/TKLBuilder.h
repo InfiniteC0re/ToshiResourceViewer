@@ -12,6 +12,9 @@ public:
 	TINT AddTranslation( const Toshi::TAnimVector& rcTranslation );
 	TINT AddRotation( const Toshi::TAnimQuaternion& rcRotation );
 	TINT AddScale( Toshi::TAnimScale flScale );
+	TINT AddTranslation( const Toshi::TAnimVector& rcTranslation, TINT iSearchStart );
+	TINT AddRotation( const Toshi::TAnimQuaternion& rcRotation, TINT iSearchStart );
+	TINT AddScale( Toshi::TAnimScale flScale, TINT iSearchStart );
 
 	const Toshi::T2DynamicVector<Toshi::TAnimVector>&     GetTranslations() const { return m_vecTranslations; }
 	const Toshi::T2DynamicVector<Toshi::TAnimQuaternion>& GetRotations() const { return m_vecRotations; }

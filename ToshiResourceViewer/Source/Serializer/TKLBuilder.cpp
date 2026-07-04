@@ -21,10 +21,17 @@ TKLBuilder::TKLBuilder()
 
 TINT TKLBuilder::AddTranslation( const Toshi::TAnimVector& rcTranslation )
 {
+	return AddTranslation( rcTranslation, 0 );
+}
+
+TINT TKLBuilder::AddTranslation( const Toshi::TAnimVector& rcTranslation, TINT iSearchStart )
+{
 	if ( m_bCompress )
 	{
 		T2_FOREACH( m_vecTranslations, it )
 		{
+			if ( it.Index() < iSearchStart ) continue;
+
 			TFLOAT flError = TMath::Abs( it->x - rcTranslation.x ) + TMath::Abs( it->y - rcTranslation.y ) + TMath::Abs( it->z - rcTranslation.z );
 			if ( flError > flMaxError ) continue;
 
@@ -38,15 +45,22 @@ TINT TKLBuilder::AddTranslation( const Toshi::TAnimVector& rcTranslation )
 
 TINT TKLBuilder::AddRotation( const Toshi::TAnimQuaternion& rcRotation )
 {
+	return AddRotation( rcRotation, 0 );
+}
+
+TINT TKLBuilder::AddRotation( const Toshi::TAnimQuaternion& rcRotation, TINT iSearchStart )
+{
 	if ( m_bCompress )
 	{
-	 	T2_FOREACH( m_vecRotations, it )
-	 	{
-	 		TFLOAT flError = TMath::Abs( it->x - rcRotation.x ) + TMath::Abs( it->y - rcRotation.y ) + TMath::Abs( it->z - rcRotation.z ) + TMath::Abs( it->w - rcRotation.w );
-	 		if ( flError > flMaxError ) continue;
-	
-	 		return it.Index();
-	 	}
+		T2_FOREACH( m_vecRotations, it )
+		{
+			if ( it.Index() < iSearchStart ) continue;
+
+			TFLOAT flError = TMath::Abs( it->x - rcRotation.x ) + TMath::Abs( it->y - rcRotation.y ) + TMath::Abs( it->z - rcRotation.z ) + TMath::Abs( it->w - rcRotation.w );
+			if ( flError > flMaxError ) continue;
+
+			return it.Index();
+		}
 	}
 
 	m_vecRotations.PushBack( rcRotation );
@@ -55,10 +69,17 @@ TINT TKLBuilder::AddRotation( const Toshi::TAnimQuaternion& rcRotation )
 
 TINT TKLBuilder::AddScale( TAnimScale flScale )
 {
+	return AddScale( flScale, 0 );
+}
+
+TINT TKLBuilder::AddScale( TAnimScale flScale, TINT iSearchStart )
+{
 	if ( m_bCompress )
 	{
 		T2_FOREACH( m_vecScales, it )
 		{
+			if ( it.Index() < iSearchStart ) continue;
+
 			if ( TMath::Abs( *it - flScale ) >= flMaxError ) continue;
 
 			return it.Index();

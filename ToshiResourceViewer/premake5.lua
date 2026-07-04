@@ -11,6 +11,7 @@ project "ToshiResourceViewer"
 	{
 		"Toshi",
 		"ImGui",
+		"OPCODE",
 		"SDL2.lib",
 		"opengl32.lib",
 		"glew32s.lib"
@@ -40,6 +41,7 @@ project "ToshiResourceViewer"
 		"%{IncludeDir.glew}",
 		"%{IncludeDir.imgui}",
 		"%{IncludeDir.assimp}",
+		"%{IncludeDir.opcode}",
 	}
 
 	defines
