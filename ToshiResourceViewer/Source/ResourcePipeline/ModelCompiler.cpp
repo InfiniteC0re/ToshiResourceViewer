@@ -110,9 +110,10 @@ void ResourcePipeline::CompileModels( const CompileOptions& rOptions )
 				if ( pTMDLElem && pTMDLElem->Attribute( "Source" ) )
 					rInput.strFilePath = pTMDLElem->Attribute( "Source" );
 
-				if ( pTMDLElem && pTMDLElem->Attribute( "Type" ) && T2String8::CompareNoCase( pTMDLElem->Attribute( "Type" ), "Skin" ) != 0 )
+				const TCHAR* pchType = pTMDLElem ? pTMDLElem->Attribute( "Type" ) : TNULL;
+				if ( pchType && T2String8::CompareNoCase( pchType, "Skin" ) != 0 && T2String8::CompareNoCase( pchType, "World" ) != 0 && T2String8::CompareNoCase( pchType, "Grass" ) != 0 )
 				{
-					TERROR( "Cannot compile %s: model type '%s' is not supported yet\n", strInputFilePath.GetString(), pTMDLElem->Attribute( "Type" ) );
+					TERROR( "Cannot compile %s: model type '%s' is not supported yet\n", strInputFilePath.GetString(), pchType );
 					rInput.bCanCompile = TFALSE;
 				}
 			}
@@ -193,7 +194,16 @@ void ResourcePipeline::CompileModels( const CompileOptions& rOptions )
 			ResourceLoader::ModelLoader_SetAnimationFilter( oAnimFilter.IsEmpty() ? TNULL : &oAnimFilter );
 			ResourceLoader::ModelLoader_SetBoneFilter( oBoneFilter.IsEmpty() ? TNULL : &oBoneFilter );
 
+			const TCHAR* pchModelType = itInput->pXML ? itInput->pXML->FirstChildElement( "TMDL" )->Attribute( "Type" ) : TNULL;
+
+			ResourceLoader::ModelType eLoadType = ResourceLoader::ModelType::Skin;
+			if ( pchModelType && T2String8::CompareNoCase( pchModelType, "World" ) == 0 )
+				eLoadType = ResourceLoader::ModelType::World;
+			else if ( pchModelType && T2String8::CompareNoCase( pchModelType, "Grass" ) == 0 )
+				eLoadType = ResourceLoader::ModelType::Grass;
+
 			ModelResourceView* pModelResView = new ModelResourceView();
+			pModelResView->SetExternalGltfType( eLoadType );
 			pModelResView->CreateExternal( itInput->strFilePath.GetString() );
 
 			ResourceLoader::ModelLoader_SetAnimationFilter( TNULL );
@@ -223,15 +233,19 @@ void ResourcePipeline::CompileModels( const CompileOptions& rOptions )
 		{
 			ModelResourceView* pModelResView = *it;
 
-			// Prepare trb for model output
+			TString8 strModelName = bUseSourceNames ? vecOutputNames[ it.Index() ] : ( rOptions.strForcedName.IsEmpty() ? strFallbackName : rOptions.strForcedName );
+
+			// Don't write a half-formed trb: a model that fails to serialize would lack
+			// Header/Database and crash the game on load
 			PTRB oOutModel;
 			oOutModel.GetSections()->CreateStream();
-			pModelResView->OnSave( &oOutModel );
+			if ( pModelResView->OnSave( &oOutModel ) )
+				oOutModel.WriteToFile( TString8::VarArgs( "%s\\%s.trb", strOutputPath.GetString(), strModelName.GetString() ).GetString(), bCompress );
+			else
+				TERROR( "Skipping '%s': model produced no valid output\n", strModelName.GetString() );
 
-			TString8 strModelName = bUseSourceNames ? vecOutputNames[ it.Index() ] : ( rOptions.strForcedName.IsEmpty() ? strFallbackName : rOptions.strForcedName );
-			oOutModel.WriteToFile( TString8::VarArgs( "%s\\%s.trb", strOutputPath.GetString(), strModelName.GetString() ).GetString(), bCompress );
-
-			if ( it.Index() + 1 == vecModelViews.Size() )
+			// Skinned models share a keylib; world/static models have none to save
+			if ( it.Index() + 1 == vecModelViews.Size() && pModelResView->HasKeyLibrary() )
 			{
 				// Prepare trb for keylib output
 				PTRB oOutKeylib;

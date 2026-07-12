@@ -13,6 +13,7 @@ project "ToshiResourceViewer"
 	{
 		"Toshi",
 		"ImGui",
+		"meshoptimizer",
 		"OPCODE",
 		"SDL2.lib",
 		"opengl32.lib",
@@ -44,6 +45,7 @@ project "ToshiResourceViewer"
 		"%{IncludeDir.imgui}",
 		"%{IncludeDir.assimp}",
 		"%{IncludeDir.opcode}",
+		"%{IncludeDir.meshoptimizer}",
 	}
 
 	defines

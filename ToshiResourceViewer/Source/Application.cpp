@@ -15,6 +15,8 @@
 #include "Shader/WorldShader.h"
 #include "AppHeadless.h"
 
+#include <cstdlib>
+
 #include <Toshi/Toshi.h>
 #include <ToshiTools/T2CommandLine.h>
 
@@ -83,9 +85,7 @@ TBOOL Application::OnCreate( TINT argc, TCHAR** argv )
 	if ( g_bHeadless )
 	{
 		HeadlessMain( argc, argv );
-		g_oTheApp.Destroy();
-
-		return TTRUE;
+		std::_Exit( 0 );
 	}
 
 	// Initialise ImGui

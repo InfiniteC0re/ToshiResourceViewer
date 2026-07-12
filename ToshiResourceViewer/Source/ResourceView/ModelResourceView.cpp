@@ -4,6 +4,7 @@
 #include "Shader/RendererSettings.h"
 #include "Application.h"
 #include "Serializer/CollisionTreeBuilder.h"
+#include "Serializer/WorldModelBuilder.h"
 
 #include <Render/TTMDWin.h>
 #include <Render/T2Render.h>
@@ -15,6 +16,8 @@
 #include <imgui_internal.h>
 
 #include "tiny_gltf.h"
+
+#include <unordered_map>
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -66,6 +69,11 @@ TBOOL ModelResourceView::OnCreate( Toshi::T2StringView pchFilePath )
 		{
 			// Create from the model's XML (applies its own animation/bone filters)
 			LoadModelFromXML( strPath.GetString() );
+		}
+		else if ( m_eExternalGltfType == ResourceLoader::ModelType::World || m_eExternalGltfType == ResourceLoader::ModelType::Grass )
+		{
+			// World/Grass geometry (no skeleton); they share the loader and differ only by shader
+			ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadWorld_GLTF( pchFilePath, m_eExternalGltfType ), m_ModelInstance );
 		}
 		else
 		{
@@ -171,10 +179,20 @@ void ModelResourceView::LoadModelFromXML( const TCHAR* pchXMLPath )
 		}
 	}
 
+	const TCHAR* pchType = pTMDL->Attribute( "Type" );
+	const TBOOL  bWorld  = pchType && T2String8::CompareNoCase( pchType, "World" ) == 0;
+	const TBOOL  bGrass  = pchType && T2String8::CompareNoCase( pchType, "Grass" ) == 0;
+
 	ResourceLoader::ModelLoader_SetAnimationFilter( oAnimFilter.IsEmpty() ? TNULL : &oAnimFilter );
 	ResourceLoader::ModelLoader_SetBoneFilter( oBoneFilter.IsEmpty() ? TNULL : &oBoneFilter );
 
-	ResourceLoader::Model_CreateInstance( ResourceLoader::Model_LoadSkin_GLTF( strGltfPath.GetString() ), m_ModelInstance );
+	// World and Grass share the world loader (differ only by shader enum on save)
+	ResourceLoader::Model_CreateInstance(
+	    ( bWorld || bGrass )
+	        ? ResourceLoader::Model_LoadWorld_GLTF( strGltfPath.GetString(), bGrass ? ResourceLoader::ModelType::Grass : ResourceLoader::ModelType::World )
+	        : ResourceLoader::Model_LoadSkin_GLTF( strGltfPath.GetString() ),
+	    m_ModelInstance
+	);
 
 	ResourceLoader::ModelLoader_SetAnimationFilter( TNULL );
 	ResourceLoader::ModelLoader_SetBoneFilter( TNULL );
@@ -187,38 +205,14 @@ TBOOL ModelResourceView::CanSave()
 	return TTRUE;
 }
 
-TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
+// Writes the SkeletonHeader + Skeleton symbols. Shared by the skin and world save paths;
+// writes nothing for a skeleton-less model (collision-only containers)
+void ModelResourceView::WriteSkeletonSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB )
 {
-	// TODO: support World mesh type
-	const TBOOL bIsSkinnedMesh = TTRUE;
-	if ( !bIsSkinnedMesh ) return TFALSE;
+	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
+	TSkeleton*         pSkeleton         = pSkeletonInstance ? pSkeletonInstance->GetSkeleton() : TNULL;
 
-	auto pKeyLib = m_ModelInstance.pModel->pKeyLib;
-
-	if ( m_bAutoSaveTKL )
-	{
-		// Save TKL
-		PTRB* pTKLTRB    = new PTRB( pOutTRB->GetEndianess() );
-		auto  pMemStream = pTKLTRB->GetSections()->CreateStream();
-
-		OnSaveTKL( pTKLTRB );
-
-		pTKLTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pKeyLib->GetTRBHeader()->m_szName ).GetString(), TFALSE );
-	}
-
-	PTRBSections* pSECT = pOutTRB->GetSections();
-	PTRBSymbols*  pSYMB = pOutTRB->GetSymbols();
-
-	PTRBSections::MemoryStream* pMemStream = pSECT->GetStack( 0 );
-
-	// Allocate FileHeader symbol
-	auto pTRBFileHeader              = pMemStream->Alloc<TTMDBase::FileHeader>();
-	pTRBFileHeader->m_uiMagic        = pOutTRB->ConvertEndianess( TFourCC( "TMDL" ) );
-	pTRBFileHeader->m_uiZero1        = pOutTRB->ConvertEndianess( 0 );
-	pTRBFileHeader->m_uiVersionMajor = pOutTRB->ConvertEndianess( TTMD_VERSION_MAJOR );
-	pTRBFileHeader->m_uiVersionMinor = pOutTRB->ConvertEndianess( TTMD_VERSION_MINOR );
-	pTRBFileHeader->m_uiZero2        = pOutTRB->ConvertEndianess( 0 );
-	pSYMB->Add( pMemStream, "FileHeader", pTRBFileHeader.get() );
+	if ( !pSkeleton ) return;
 
 	// Allocate SkeletonHeader symbol
 	auto        pTRBSkeletonHeader = pMemStream->Alloc<TTMDBase::SkeletonHeader>();
@@ -231,9 +225,6 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	pTRBSkeletonHeader->m_iQBaseIndex = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iQBaseIndex );
 	pTRBSkeletonHeader->m_iSBaseIndex = pOutTRB->ConvertEndianess( rSkeletonHeader.m_iSBaseIndex );
 	pSYMB->Add( pMemStream, "SkeletonHeader", pTRBSkeletonHeader.get() );
-
-	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
-	TSkeleton*         pSkeleton         = pSkeletonInstance->GetSkeleton();
 
 	// Allocate Skeleton symbol
 	const TINT iNumBones = pSkeleton->m_iBoneCount;
@@ -298,6 +289,42 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	}
 
 	pSYMB->Add( pMemStream, "Skeleton", pTRBSkeleton.get() );
+}
+
+TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
+{
+	if ( m_ModelInstance.pModel->eModelType == ResourceLoader::ModelType::World ||
+	     m_ModelInstance.pModel->eModelType == ResourceLoader::ModelType::Grass )
+		return OnSaveWorld( pOutTRB );
+
+	auto pKeyLib = m_ModelInstance.pModel->pKeyLib;
+
+	if ( m_bAutoSaveTKL )
+	{
+		PTRB* pTKLTRB    = new PTRB( pOutTRB->GetEndianess() );
+		auto  pMemStream = pTKLTRB->GetSections()->CreateStream();
+
+		OnSaveTKL( pTKLTRB );
+
+		pTKLTRB->WriteToFile( TString8::VarArgs( "%s.tkl", pKeyLib->GetTRBHeader()->m_szName ).GetString(), TFALSE );
+	}
+
+	PTRBSections* pSECT = pOutTRB->GetSections();
+	PTRBSymbols*  pSYMB = pOutTRB->GetSymbols();
+
+	PTRBSections::MemoryStream* pMemStream = pSECT->GetStack( 0 );
+
+	auto pTRBFileHeader              = pMemStream->Alloc<TTMDBase::FileHeader>();
+	pTRBFileHeader->m_uiMagic        = pOutTRB->ConvertEndianess( TFourCC( "TMDL" ) );
+	pTRBFileHeader->m_uiZero1        = pOutTRB->ConvertEndianess( 0 );
+	pTRBFileHeader->m_uiVersionMajor = pOutTRB->ConvertEndianess( TTMD_VERSION_MAJOR );
+	pTRBFileHeader->m_uiVersionMinor = pOutTRB->ConvertEndianess( TTMD_VERSION_MINOR );
+	pTRBFileHeader->m_uiZero2        = pOutTRB->ConvertEndianess( 0 );
+	pSYMB->Add( pMemStream, "FileHeader", pTRBFileHeader.get() );
+
+	// Skeleton symbols (skeleton-less "_col" containers write nothing; shared with the
+	// world path, since world props carry a skeleton too)
+	WriteSkeletonSymbols( pOutTRB, pMemStream, pSYMB );
 
 	// Allocate Materials symbol
 	T2Map<TPString8, TString8, TPString8::Comparator> mapMaterials;
@@ -475,6 +502,69 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 	}
 
 	return TTRUE;
+}
+
+TBOOL ModelResourceView::OnSaveWorld( PTRB* pOutTRB )
+{
+	PTRBSections* pSECT = pOutTRB->GetSections();
+	PTRBSymbols*  pSYMB = pOutTRB->GetSymbols();
+
+	PTRBSections::MemoryStream* pMemStream = pSECT->GetStack( 0 );
+
+	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
+
+	// World props carry a skeleton (rigid root/instance bone). Write it, or the game
+	// builds a null skeleton instance and crashes on render
+	WriteSkeletonSymbols( pOutTRB, pMemStream, pSYMB );
+
+	T2Map<TPString8, TString8, TPString8::Comparator> mapMaterials;
+	auto                                              pTRBMaterialsHeader = pMemStream->Alloc<TTMDBase::MaterialsHeader>();
+
+	TINT iNumMaterials = 0;
+	for ( TINT k = 0; k < pModel->iLODCount; k++ )
+	{
+		Toshi::TModelLOD* pLOD = &pModel->aLODs[ k ];
+		for ( TINT i = 0; i < pLOD->iNumMeshes; i++ )
+		{
+			TString8 strMaterialName, strTextureName;
+			TSTATICCAST( Mesh, pLOD->ppMeshes[ i ] )->GetMaterialInfo( strMaterialName, strTextureName );
+
+			auto itOverride = m_mapXMLTextureOverrides.Find( TPS8D( strMaterialName ) );
+			if ( itOverride != m_mapXMLTextureOverrides.End() )
+				strTextureName = itOverride->second;
+
+			if ( mapMaterials.Find( TPS8D( strMaterialName ) ) == mapMaterials.End() )
+			{
+				iNumMaterials += 1;
+				mapMaterials.Insert( TPS8D( strMaterialName ), strTextureName );
+			}
+		}
+	}
+
+	pTRBMaterialsHeader->iNumMaterials = pOutTRB->ConvertEndianess( iNumMaterials );
+	pTRBMaterialsHeader->uiSectionSize = pOutTRB->ConvertEndianess( sizeof( TTMDBase::Material ) * iNumMaterials );
+
+	auto pTRBMaterials   = pMemStream->Alloc<TTMDBase::Material>( iNumMaterials );
+	TINT iNumWrittenMats = 0;
+	T2_FOREACH( mapMaterials, it )
+	{
+		auto pTRBMaterial = pTRBMaterials + iNumWrittenMats;
+		T2String8::Copy( pTRBMaterial->szMatName, it->first.GetString(), sizeof( pTRBMaterial->szMatName ) - 1 );
+		T2String8::Copy( pTRBMaterial->szTextureFile, it->second.GetString(), sizeof( pTRBMaterial->szTextureFile ) - 1 );
+		iNumWrittenMats += 1;
+	}
+
+	pSYMB->Add( pMemStream, "Materials", pTRBMaterialsHeader.get() );
+
+	// World/grass still need a Collision symbol (empty for terrain LODs) - the loader does
+	// GetSymbol("Collision")->m_iNumMeshes unconditionally and null-derefs without it
+	auto pTRBCollision          = pMemStream->Alloc<TTMDBase::CollisionHeader>();
+	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( pModel->iNumCollisionMeshes );
+	pTRBCollision->m_pMeshes    = TNULL;
+	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
+
+	// Header + Database: the world geometry, tiled into chunks
+	return WorldModelBuilder::WriteWorldModel( pOutTRB, pMemStream, pSYMB, pModel.Get(), m_fWorldChunkSize );
 }
 
 void ModelResourceView::OnDestroy()
@@ -824,7 +914,6 @@ void ModelResourceView::OnRender( TFLOAT flDeltaTime )
 
 void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )
 {
-	// Save TKL
 	auto pMemStream = pOutTRB->GetSections()->GetStack( 0 );
 
 	auto pSrcHeader = m_ModelInstance.pModel->pKeyLib->GetTRBHeader();
@@ -869,6 +958,341 @@ void ModelResourceView::OnSaveTKL( PTRB* pOutTRB )
 	}
 
 	pOutTRB->GetSymbols()->Add( pMemStream, "keylib", pTKLHeader.get() );
+}
+
+// Merges all world meshes that share a material into a single mesh, welding the
+// duplicate vertices the chunks share at their seams. This flattens the engine's
+// per-cell tiling into one editable surface per material; the compiler re-chunks
+// it on the way back
+static void MergeWorldMeshesByMaterial( tinygltf::Model& rGltf, tinygltf::Node& rRootNode )
+{
+	struct WorldVtx
+	{
+		TFLOAT f[ 11 ]; // Position(3) Normal(3) Color(3) UV(2) - matches WorldMesh::WorldVertex
+	};
+
+	struct MatGroup
+	{
+		std::vector<WorldVtx>                    vecVerts;
+		std::vector<TUINT16>                     vecIndices;
+		std::unordered_map<std::string, TUINT16> mapWeld;
+	};
+
+	std::map<TINT, MatGroup> mapByMaterial;
+
+	// Weld every mesh's triangles under its material
+	for ( auto& rNode : rGltf.nodes )
+	{
+		if ( rNode.mesh < 0 ) continue;
+
+		auto& rMesh = rGltf.meshes[ rNode.mesh ];
+		if ( rMesh.primitives.empty() ) continue;
+
+		auto& rPrim = rMesh.primitives[ 0 ];
+		if ( rPrim.attributes.count( "POSITION" ) == 0 ) continue;
+
+		auto& rPosAcc = rGltf.accessors[ rPrim.attributes[ "POSITION" ] ];
+		auto& rPosBV  = rGltf.bufferViews[ rPosAcc.bufferView ];
+		auto& rPosBuf = rGltf.buffers[ rPosBV.buffer ];
+		const TUINT   uiStride = rPosBV.byteStride ? rPosBV.byteStride : sizeof( WorldVtx );
+		const TBYTE*  pVertBase = rPosBuf.data.data() + rPosBV.byteOffset;
+
+		auto& rIdxAcc = rGltf.accessors[ rPrim.indices ];
+		auto& rIdxBV  = rGltf.bufferViews[ rIdxAcc.bufferView ];
+		auto& rIdxBuf = rGltf.buffers[ rIdxBV.buffer ];
+		const TUINT16* pStrip = TREINTERPRETCAST( const TUINT16*, rIdxBuf.data.data() + rIdxBV.byteOffset + rIdxAcc.byteOffset );
+		const TUINT    uiNum  = TUINT( rIdxAcc.count );
+		const TBOOL    bStrip = rPrim.mode == TINYGLTF_MODE_TRIANGLE_STRIP;
+
+		MatGroup& rGroup = mapByMaterial[ rPrim.material ];
+
+		auto fnAddVertex = [ & ]( TUINT16 uiSrc ) {
+			const WorldVtx& rVtx = *TREINTERPRETCAST( const WorldVtx*, pVertBase + uiStride * uiSrc );
+			std::string     strKey( TREINTERPRETCAST( const char*, &rVtx ), sizeof( WorldVtx ) );
+
+			auto it = rGroup.mapWeld.find( strKey );
+			if ( it == rGroup.mapWeld.end() )
+			{
+				TUINT16 uiNew = TUINT16( rGroup.vecVerts.size() );
+				rGroup.mapWeld.emplace( std::move( strKey ), uiNew );
+				rGroup.vecVerts.push_back( rVtx );
+				rGroup.vecIndices.push_back( uiNew );
+			}
+			else
+			{
+				rGroup.vecIndices.push_back( it->second );
+			}
+		};
+
+		auto fnAddTriangle = [ & ]( TUINT16 a, TUINT16 b, TUINT16 c ) {
+			if ( a == b || b == c || a == c ) return;
+			fnAddVertex( a ); fnAddVertex( b ); fnAddVertex( c );
+		};
+
+		if ( bStrip )
+		{
+			TUINT uiRunStart = 0;
+			for ( TUINT i = 0; i + 2 < uiNum; i++ )
+			{
+				const TUINT16 a = pStrip[ i ], b = pStrip[ i + 1 ], c = pStrip[ i + 2 ];
+				if ( a == 0xFFFF ) { uiRunStart = i + 1; continue; }
+				if ( b == 0xFFFF ) { uiRunStart = i + 2; continue; }
+				if ( c == 0xFFFF ) { uiRunStart = i + 3; continue; }
+				( ( i - uiRunStart ) & 1 ) == 0 ? fnAddTriangle( a, b, c ) : fnAddTriangle( b, a, c );
+			}
+		}
+		else
+		{
+			for ( TUINT i = 0; i + 2 < uiNum; i += 3 )
+				fnAddTriangle( pStrip[ i ], pStrip[ i + 1 ], pStrip[ i + 2 ] );
+		}
+	}
+
+	// The rebuild below wipes every node/accessor/buffer, but world props carry a skeleton
+	// (and sometimes animation) that must survive and be repointed, or the recompile crashes
+	struct SavedAccessor
+	{
+		int                        iComponentType = 0;
+		int                        iType          = 0;
+		TSIZE                      uiCount        = 0;
+		std::vector<double>        vMin, vMax;
+		std::vector<unsigned char> vBytes; // tightly packed, no stride
+	};
+
+	std::vector<tinygltf::Node> vecSavedBones;        // in skin-joint order
+	std::vector<TINT>           vecSavedRoots;        // joint positions with no parent joint
+	std::map<TINT, TINT>        mapOldNodeToJointPos; // old bone node index -> joint position
+	std::vector<SavedAccessor>  vecSavedAcc;          // animation accessors, repacked
+	std::map<int, int>          mapOldAccToSaved;     // old accessor index -> index in vecSavedAcc
+	const TBOOL                 bHadSkin = !rGltf.skins.empty() && !rGltf.skins[ 0 ].joints.empty();
+
+	if ( bHadSkin )
+	{
+		auto& rSkin = rGltf.skins[ 0 ];
+		for ( TSIZE p = 0; p < rSkin.joints.size(); p++ ) mapOldNodeToJointPos[ rSkin.joints[ p ] ] = TINT( p );
+
+		std::vector<TBOOL> vecIsChild( rSkin.joints.size(), TFALSE );
+		for ( TSIZE p = 0; p < rSkin.joints.size(); p++ )
+		{
+			tinygltf::Node oBone = rGltf.nodes[ rSkin.joints[ p ] ];
+			oBone.mesh           = -1; // a bone carries no mesh
+
+			std::vector<int> vecChildPos;
+			for ( int c : oBone.children )
+			{
+				auto it = mapOldNodeToJointPos.find( c );
+				if ( it != mapOldNodeToJointPos.end() ) { vecChildPos.push_back( it->second ); vecIsChild[ it->second ] = TTRUE; }
+			}
+			oBone.children = vecChildPos; // temporarily holds joint POSITIONS
+			vecSavedBones.push_back( std::move( oBone ) );
+		}
+		for ( TSIZE p = 0; p < vecSavedBones.size(); p++ )
+			if ( !vecIsChild[ p ] ) vecSavedRoots.push_back( TINT( p ) );
+
+		// Capture the animation accessors, repacked so they don't depend on the cleared buffers
+		auto fnCaptureAccessor = [ & ]( int iAcc ) {
+			if ( iAcc < 0 || iAcc >= TINT( rGltf.accessors.size() ) || mapOldAccToSaved.count( iAcc ) ) return;
+			auto&       rAcc     = rGltf.accessors[ iAcc ];
+			auto&       rBV      = rGltf.bufferViews[ rAcc.bufferView ];
+			auto&       rBuf     = rGltf.buffers[ rBV.buffer ];
+			const TSIZE uiComp   = TSIZE( tinygltf::GetNumComponentsInType( rAcc.type ) );
+			const TSIZE uiElem   = uiComp * TSIZE( tinygltf::GetComponentSizeInBytes( rAcc.componentType ) );
+			const TSIZE uiStride = rBV.byteStride ? rBV.byteStride : uiElem;
+
+			SavedAccessor oSaved;
+			oSaved.iComponentType = rAcc.componentType;
+			oSaved.iType          = rAcc.type;
+			oSaved.uiCount        = rAcc.count;
+			oSaved.vMin           = rAcc.minValues;
+			oSaved.vMax           = rAcc.maxValues;
+			for ( TSIZE k = 0; k < rAcc.count; k++ )
+			{
+				const unsigned char* p = rBuf.data.data() + rBV.byteOffset + rAcc.byteOffset + k * uiStride;
+				oSaved.vBytes.insert( oSaved.vBytes.end(), p, p + uiElem );
+			}
+			mapOldAccToSaved[ iAcc ] = TINT( vecSavedAcc.size() );
+			vecSavedAcc.push_back( std::move( oSaved ) );
+		};
+
+		for ( auto& rAnim : rGltf.animations )
+			for ( auto& rSampler : rAnim.samplers )
+			{
+				fnCaptureAccessor( rSampler.input );
+				fnCaptureAccessor( rSampler.output );
+			}
+	}
+
+	// Rebuild the geometry (materials/textures stay untouched)
+	rGltf.meshes.clear();
+	rGltf.nodes.clear();
+	rGltf.buffers.clear();
+	rGltf.bufferViews.clear();
+	rGltf.accessors.clear();
+	rRootNode.children.clear();
+
+	for ( auto& rPair : mapByMaterial )
+	{
+		MatGroup& rGroup = rPair.second;
+		if ( rGroup.vecVerts.empty() ) continue;
+
+		tinygltf::Buffer oBuffer;
+		const TSIZE uiVertBytes = rGroup.vecVerts.size() * sizeof( WorldVtx );
+		const TSIZE uiIdxBytes  = rGroup.vecIndices.size() * sizeof( TUINT16 );
+		oBuffer.data.insert( oBuffer.data.end(), TREINTERPRETCAST( TBYTE*, rGroup.vecVerts.data() ), TREINTERPRETCAST( TBYTE*, rGroup.vecVerts.data() ) + uiVertBytes );
+		oBuffer.data.insert( oBuffer.data.end(), TREINTERPRETCAST( TBYTE*, rGroup.vecIndices.data() ), TREINTERPRETCAST( TBYTE*, rGroup.vecIndices.data() ) + uiIdxBytes );
+		rGltf.buffers.push_back( std::move( oBuffer ) );
+		const TINT iBuffer = TINT( rGltf.buffers.size() - 1 );
+
+		tinygltf::BufferView oVBV;
+		oVBV.buffer = iBuffer; oVBV.byteOffset = 0; oVBV.byteLength = uiVertBytes; oVBV.byteStride = sizeof( WorldVtx ); oVBV.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+		rGltf.bufferViews.push_back( oVBV );
+		const TINT iVBV = TINT( rGltf.bufferViews.size() - 1 );
+
+		tinygltf::BufferView oIBV;
+		oIBV.buffer = iBuffer; oIBV.byteOffset = uiVertBytes; oIBV.byteLength = uiIdxBytes; oIBV.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
+		rGltf.bufferViews.push_back( oIBV );
+		const TINT iIBV = TINT( rGltf.bufferViews.size() - 1 );
+
+		std::vector<double> vMin = { 1e30, 1e30, 1e30 }, vMax = { -1e30, -1e30, -1e30 };
+		for ( auto& rVtx : rGroup.vecVerts )
+			for ( TINT c = 0; c < 3; c++ ) { vMin[ c ] = TMath::Min( vMin[ c ], TDOUBLE( rVtx.f[ c ] ) ); vMax[ c ] = TMath::Max( vMax[ c ], TDOUBLE( rVtx.f[ c ] ) ); }
+
+		auto fnAcc = [ & ]( TINT iType, TINT iOffset, TBOOL bBounds ) -> TINT {
+			tinygltf::Accessor a;
+			a.bufferView = iVBV; a.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT; a.type = iType; a.count = rGroup.vecVerts.size(); a.byteOffset = iOffset;
+			if ( bBounds ) { a.minValues = vMin; a.maxValues = vMax; }
+			rGltf.accessors.push_back( a );
+			return TINT( rGltf.accessors.size() - 1 );
+		};
+
+		const TINT iPos = fnAcc( TINYGLTF_TYPE_VEC3, 0, TTRUE );
+		const TINT iNrm = fnAcc( TINYGLTF_TYPE_VEC3, 12, TFALSE );
+		const TINT iCol = fnAcc( TINYGLTF_TYPE_VEC3, 24, TFALSE );
+		const TINT iUV  = fnAcc( TINYGLTF_TYPE_VEC2, 36, TFALSE );
+
+		tinygltf::Accessor oIdxAcc;
+		oIdxAcc.bufferView = iIBV; oIdxAcc.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT; oIdxAcc.type = TINYGLTF_TYPE_SCALAR; oIdxAcc.count = rGroup.vecIndices.size();
+		rGltf.accessors.push_back( oIdxAcc );
+		const TINT iIdx = TINT( rGltf.accessors.size() - 1 );
+
+		tinygltf::Primitive oPrim;
+		oPrim.attributes[ "POSITION" ] = iPos;
+		oPrim.attributes[ "NORMAL" ]   = iNrm;
+		oPrim.attributes[ "COLOR_0" ]  = iCol;
+		oPrim.attributes[ "TEXCOORD_0" ] = iUV;
+		oPrim.indices  = iIdx;
+		oPrim.mode     = TINYGLTF_MODE_TRIANGLES;
+		oPrim.material = rPair.first;
+
+		tinygltf::Mesh oMesh;
+		oMesh.primitives.push_back( std::move( oPrim ) );
+		oMesh.name = ( rPair.first >= 0 ) ? rGltf.materials[ rPair.first ].name : std::string( "mesh" );
+		rGltf.meshes.push_back( std::move( oMesh ) );
+
+		tinygltf::Node oNode;
+		oNode.mesh = TINT( rGltf.meshes.size() - 1 );
+		oNode.name = rGltf.meshes.back().name;
+		rGltf.nodes.push_back( std::move( oNode ) );
+		rRootNode.children.push_back( TINT( rGltf.nodes.size() - 1 ) );
+	}
+
+	// Re-append the preserved skeleton and repoint the skin at the new node indices. IBM
+	// is dropped (recompile reads bone transforms from the nodes)
+	if ( bHadSkin && !vecSavedBones.empty() )
+	{
+		auto&      rSkin = rGltf.skins[ 0 ];
+		const TINT iBase = TINT( rGltf.nodes.size() );
+
+		for ( auto& rBone : vecSavedBones )
+		{
+			tinygltf::Node   oBone = rBone;
+			std::vector<int> vecChildren;
+			for ( int iPos : oBone.children ) vecChildren.push_back( iBase + iPos ); // positions -> new indices
+			oBone.children = vecChildren;
+			rGltf.nodes.push_back( std::move( oBone ) );
+		}
+
+		std::vector<int> vecJoints;
+		for ( TSIZE p = 0; p < vecSavedBones.size(); p++ ) vecJoints.push_back( iBase + TINT( p ) );
+		rSkin.joints   = vecJoints;
+		rSkin.skeleton = vecSavedRoots.empty() ? iBase : ( iBase + vecSavedRoots[ 0 ] );
+
+		// Rebuild an identity IBM. The recompile ignores it, but the decompiler's bone dedup
+		// only runs with a valid IBM (>= 0) - and that dedup writes the bone GltfName mapping
+		// merged props need, else they lose bones and blow up to infinity in-game
+		std::vector<float> vecIBM;
+		for ( TSIZE p = 0; p < vecSavedBones.size(); p++ )
+		{
+			static const float s_kIdentity[ 16 ] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+			vecIBM.insert( vecIBM.end(), s_kIdentity, s_kIdentity + 16 );
+		}
+		tinygltf::Buffer oIBMBuf;
+		oIBMBuf.data.assign( TREINTERPRETCAST( const TBYTE*, vecIBM.data() ), TREINTERPRETCAST( const TBYTE*, vecIBM.data() ) + vecIBM.size() * sizeof( float ) );
+		rGltf.buffers.push_back( std::move( oIBMBuf ) );
+
+		tinygltf::BufferView oIBMBV;
+		oIBMBV.buffer     = TINT( rGltf.buffers.size() - 1 );
+		oIBMBV.byteOffset = 0;
+		oIBMBV.byteLength = vecIBM.size() * sizeof( float );
+		rGltf.bufferViews.push_back( oIBMBV );
+
+		tinygltf::Accessor oIBMAcc;
+		oIBMAcc.bufferView    = TINT( rGltf.bufferViews.size() - 1 );
+		oIBMAcc.byteOffset    = 0;
+		oIBMAcc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+		oIBMAcc.type          = TINYGLTF_TYPE_MAT4;
+		oIBMAcc.count         = rSkin.joints.size();
+		rGltf.accessors.push_back( oIBMAcc );
+		rSkin.inverseBindMatrices = TINT( rGltf.accessors.size() - 1 );
+
+		for ( TINT iRoot : vecSavedRoots )
+			rRootNode.children.push_back( iBase + iRoot );
+
+		// Re-emit the captured animation accessors and repoint samplers + channel targets
+		std::vector<int> vecSavedAccNewIndex( vecSavedAcc.size(), -1 );
+		for ( TSIZE s = 0; s < vecSavedAcc.size(); s++ )
+		{
+			SavedAccessor& rSaved = vecSavedAcc[ s ];
+
+			tinygltf::Buffer oBuf;
+			oBuf.data = rSaved.vBytes;
+			rGltf.buffers.push_back( std::move( oBuf ) );
+
+			tinygltf::BufferView oBV;
+			oBV.buffer     = TINT( rGltf.buffers.size() - 1 );
+			oBV.byteOffset = 0;
+			oBV.byteLength = rSaved.vBytes.size();
+			rGltf.bufferViews.push_back( oBV );
+
+			tinygltf::Accessor oAcc;
+			oAcc.bufferView    = TINT( rGltf.bufferViews.size() - 1 );
+			oAcc.byteOffset    = 0;
+			oAcc.componentType = rSaved.iComponentType;
+			oAcc.type          = rSaved.iType;
+			oAcc.count         = rSaved.uiCount;
+			oAcc.minValues     = rSaved.vMin;
+			oAcc.maxValues     = rSaved.vMax;
+			rGltf.accessors.push_back( oAcc );
+
+			vecSavedAccNewIndex[ s ] = TINT( rGltf.accessors.size() - 1 );
+		}
+
+		for ( auto& rAnim : rGltf.animations )
+		{
+			for ( auto& rSampler : rAnim.samplers )
+			{
+				auto itIn = mapOldAccToSaved.find( rSampler.input );
+				if ( itIn != mapOldAccToSaved.end() ) rSampler.input = vecSavedAccNewIndex[ itIn->second ];
+				auto itOut = mapOldAccToSaved.find( rSampler.output );
+				if ( itOut != mapOldAccToSaved.end() ) rSampler.output = vecSavedAccNewIndex[ itOut->second ];
+			}
+			for ( auto& rChannel : rAnim.channels )
+			{
+				auto itNode = mapOldNodeToJointPos.find( rChannel.target_node );
+				if ( itNode != mapOldNodeToJointPos.end() ) rChannel.target_node = iBase + itNode->second;
+			}
+		}
+	}
 }
 
 TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
@@ -1190,6 +1614,10 @@ TBOOL ModelResourceView::ExportScene( tinygltf::Model& rOutModel )
 		}
 	}
 
+	// Flatten the engine's per-cell tiling into one mesh per material
+	if ( pModel->eModelType == ResourceLoader::ModelType::World || pModel->eModelType == ResourceLoader::ModelType::Grass )
+		MergeWorldMeshesByMaterial( gltfModel, gltfRootNode );
+
 	//-----------------------------------------------------------------------------
 	// 3. Collision
 	//-----------------------------------------------------------------------------
@@ -1443,6 +1871,12 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 	pTMDLElem->SetAttribute( "Name", m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) ).GetString() );
 	pTMDLElem->SetAttribute( "Type", ResourceLoader::GetModelTypeName( m_ModelInstance.pModel->eModelType ) );
 
+	// Meshes are merged per material on export; ChunkSize re-tiles on compile for culling
+	// (0 keeps only the 16-bit split)
+	if ( m_ModelInstance.pModel->eModelType == ResourceLoader::ModelType::World ||
+	     m_ModelInstance.pModel->eModelType == ResourceLoader::ModelType::Grass )
+		pTMDLElem->SetAttribute( "ChunkSize", 18.0f );
+
 	auto pLODsElem = pTMDLElem->InsertNewChildElement( "LODs" );
 
 	auto pRenderDistanceElem = pLODsElem->InsertNewChildElement( "RenderDistance" );
@@ -1577,6 +2011,8 @@ void ModelResourceView::DeserializeModelInformation( tinyxml2::XMLDocument* pInp
 {
 	auto pTMDLElem = pInput->FirstChildElement( "TMDL" );
 	if ( !pTMDLElem ) return;
+
+	m_fWorldChunkSize = pTMDLElem->FloatAttribute( "ChunkSize", 0.0f );
 
 	// Texture path per material, so OnSave can override the glTF texture (Blender
 	// strips or drops it)

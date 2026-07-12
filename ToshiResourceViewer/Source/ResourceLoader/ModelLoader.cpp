@@ -3,7 +3,7 @@
 #include "Shader/SkinShader.h"
 #include "Shader/WorldShader.h"
 #include "Resource/StreamedTexture.h"
-#include "NvTriStrip/NvTriStrip.h"
+#include "MeshOptimize/MeshOptimize.h"
 #include "Application.h"
 
 #include <Toshi/T2String.h>
@@ -19,6 +19,8 @@
 
 #include <tiny_gltf.h>
 #include <cstdio>
+#include <map>
+#include <array>
 
 //-----------------------------------------------------------------------------
 // Enables memory debugging.
@@ -173,28 +175,32 @@ static void ModelLoader_LoadGLTFCollisionMeshes( const tinygltf::Model& gltfMode
 			vecCollisionNodes[ gltfNode.mesh ] = TINT( i );
 	}
 
-	TINT iNumCollisionMeshes = 0;
+	// Each valid collision mesh becomes one group, in gltf order
+	T2DynamicVector<TSIZE> vecGroupMeshes;
 	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
 	{
 		if ( vecCollisionMeshes[ i ] && ModelLoader_IsGLTFCollisionMeshValid( gltfModel.meshes[ i ] ) )
-			iNumCollisionMeshes += 1;
+			vecGroupMeshes.PushBack( i );
 	}
 
-	if ( iNumCollisionMeshes == 0 ) return;
+	if ( vecGroupMeshes.IsEmpty() ) return;
 
-	pModel->iNumCollisionMeshes = iNumCollisionMeshes;
-	pModel->pCollisionMeshes    = new ResourceLoader::Model::CollisionMeshInfo[ iNumCollisionMeshes ];
+	// The engine stores collision as one mesh split into groups (a run of faces sharing
+	// a collision material). The decompiler exports each group as its own glTF mesh over
+	// a shared vertex pool, so weld them back into a single mesh - one group per source
+	pModel->iNumCollisionMeshes = 1;
+	pModel->pCollisionMeshes    = new ResourceLoader::Model::CollisionMeshInfo[ 1 ];
 
-	TINT iOutCollisionMesh = 0;
-	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	auto& rOutMesh   = pModel->pCollisionMeshes[ 0 ];
+	rOutMesh.iBoneID = -1;
+
+	std::map<std::array<TUINT32, 3>, TUINT16> mapVertex; // exact position bits -> merged index
+
+	T2_FOREACH( vecGroupMeshes, itGroupMesh )
 	{
-		if ( !vecCollisionMeshes[ i ] ) continue;
-
-		auto& gltfMesh = gltfModel.meshes[ i ];
-		if ( !ModelLoader_IsGLTFCollisionMeshValid( gltfMesh ) ) continue;
-
-		auto& gltfPrimitive = gltfMesh.primitives[ 0 ];
-		auto& rOutMesh      = pModel->pCollisionMeshes[ iOutCollisionMesh++ ];
+		const TSIZE iMeshIdx      = *itGroupMesh;
+		auto&       gltfMesh      = gltfModel.meshes[ iMeshIdx ];
+		auto&       gltfPrimitive = gltfMesh.primitives[ 0 ];
 
 		const TINT iAccPositionIndex = gltfPrimitive.attributes.at( "POSITION" );
 		auto&      gltfPositionAcc   = gltfModel.accessors[ iAccPositionIndex ];
@@ -206,75 +212,59 @@ static void ModelLoader_LoadGLTFCollisionMeshes( const tinygltf::Model& gltfMode
 
 		const TUINT uiPositionStride = ( gltfPositionView.byteStride != 0 ) ? gltfPositionView.byteStride : sizeof( TVector3 );
 
-		rOutMesh.iBoneID       = -1;
-		rOutMesh.uiNumVertices = gltfPositionAcc.count;
-		rOutMesh.vecVertices.SetSize( rOutMesh.uiNumVertices );
-
-		for ( TUINT k = 0; k < rOutMesh.uiNumVertices; k++ )
-		{
-			const TBYTE* pPosition = gltfPositionBuf.data.data() + gltfPositionView.byteOffset + gltfPositionAcc.byteOffset + ( uiPositionStride * k );
-			rOutMesh.vecVertices[ k ] = *TREINTERPRETCAST( const TVector3*, pPosition );
-		}
-
 		auto& gltfIndexAcc  = gltfModel.accessors[ gltfPrimitive.indices ];
 		auto& gltfIndexView = gltfModel.bufferViews[ gltfIndexAcc.bufferView ];
 		auto& gltfIndexBuf  = gltfModel.buffers[ gltfIndexView.buffer ];
 
 		TASSERT( gltfIndexAcc.type == TINYGLTF_TYPE_SCALAR );
 
-		rOutMesh.uiNumIndices = gltfIndexAcc.count;
-		rOutMesh.vecIndices.SetSize( rOutMesh.uiNumIndices );
+		const TUINT uiNumIndices = TUINT( gltfIndexAcc.count );
+		for ( TUINT k = 0; k < uiNumIndices; k++ )
+		{
+			const TUINT16   uiSrcIndex = ModelLoader_ReadGLTFIndex( gltfIndexBuf, gltfIndexView, gltfIndexAcc, k );
+			const TBYTE*    pPosition  = gltfPositionBuf.data.data() + gltfPositionView.byteOffset + gltfPositionAcc.byteOffset + ( uiPositionStride * uiSrcIndex );
+			const TVector3& rPosition  = *TREINTERPRETCAST( const TVector3*, pPosition );
 
-		for ( TUINT k = 0; k < rOutMesh.uiNumIndices; k++ )
-			rOutMesh.vecIndices[ k ] = ModelLoader_ReadGLTFIndex( gltfIndexBuf, gltfIndexView, gltfIndexAcc, k );
+			const std::array<TUINT32, 3> key = {
+				*TREINTERPRETCAST( const TUINT32*, &rPosition.x ),
+				*TREINTERPRETCAST( const TUINT32*, &rPosition.y ),
+				*TREINTERPRETCAST( const TUINT32*, &rPosition.z ),
+			};
 
-		const tinygltf::Node* pNode = ( vecCollisionNodes[ i ] != -1 ) ? &gltfModel.nodes[ vecCollisionNodes[ i ] ] : TNULL;
+			auto    it = mapVertex.find( key );
+			TUINT16 uiMergedIndex;
+			if ( it == mapVertex.end() )
+			{
+				uiMergedIndex    = TUINT16( rOutMesh.vecVertices.Size() );
+				mapVertex[ key ] = uiMergedIndex;
+				rOutMesh.vecVertices.PushBack( rPosition );
+			}
+			else
+			{
+				uiMergedIndex = it->second;
+			}
 
-		auto& rGroup = rOutMesh.vecGroups.PushBack();
+			rOutMesh.vecIndices.PushBack( uiMergedIndex );
+		}
+
+		const tinygltf::Node* pNode = ( vecCollisionNodes[ iMeshIdx ] != -1 ) ? &gltfModel.nodes[ vecCollisionNodes[ iMeshIdx ] ] : TNULL;
+
+		auto& rGroup      = rOutMesh.vecGroups.PushBack();
 		rGroup.strName    = ModelLoader_GetGLTFCollisionName( gltfModel, pNode, gltfMesh );
-		rGroup.uiNumFaces = rOutMesh.uiNumIndices / 3;
+		rGroup.uiNumFaces = uiNumIndices / 3;
 	}
+
+	rOutMesh.uiNumVertices = rOutMesh.vecVertices.Size();
+	rOutMesh.uiNumIndices  = rOutMesh.vecIndices.Size();
 }
 
-Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath )
+// Loads the skeleton (bones + sequences + keyframe library) from the gltf skin into
+// pModel, and fills mapGltfBoneToTRVBone (gltf joint node -> TRV bone) for the caller's
+// skinning. Shared by the skin and world loaders - world props carry a skeleton too (a
+// root/instance bone, usually 0 sequences). No-op when the gltf has no skin
+static void ModelLoader_LoadGLTFSkeleton( const tinygltf::Model& gltfModel, ResourceLoader::Model* pModel, Toshi::T2Map<TINT, TINT>& mapGltfBoneToTRVBone, Toshi::T2StringView pchFilePath )
 {
-	TINFO( "Importing skin model from GLTF file: %s\n", pchFilePath.Get() );
-
-	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
-
-	// Load GLTF
-	tinygltf::Model    gltfModel;
-	tinygltf::TinyGLTF gltfLoader;
-
-	std::string strError;
-	std::string strWarning;
-
-	TBOOL bLoadedGLTF = gltfLoader.LoadASCIIFromFile( &gltfModel, &strError, &strWarning, pchFilePath.Get() );
-	TASSERT( bLoadedGLTF == TTRUE );
-
-	if ( !bLoadedGLTF )
-	{
-		TERROR( "An error has occured while loading the GLTF file\n" );
-		if ( !strError.empty() ) TERROR( "ERROR: %s\n", strError.c_str() );
-		return {};
-	}
-
-	// Initialise the model
-	pModel->eModelType         = ModelType::Skin;
-	pModel->pTRB               = NULL;
-	pModel->iLODCount          = 1;
-	pModel->fRenderDistance    = 50.0f;
-	pModel->bAnimationsLoaded  = TFALSE;
-
-	ModelLoader_InitLODDistances( pModel->aLODDistances );
-
-	// We can't have more than 1 skins on a single model
-	TASSERT( gltfModel.skins.size() <= 1 );
-
-	// Setup skeleton
-	T2Map<TINT, TINT> mapGltfBoneToTRVBone;
-	const TBOOL       bHasSkins = gltfModel.skins.size() == 1;
-	if ( bHasSkins )
+	if ( gltfModel.skins.size() != 1 ) return;
 	{
 		TINFO( "Detected skin\n" );
 		auto pGLTFSkin = &gltfModel.skins[ 0 ];
@@ -485,8 +475,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 			for ( TSIZE k = 0; k < gltfAnim.channels.size(); k++ )
 			{
 				auto& gltfAnimChannel = gltfAnim.channels[ k ];
+				if ( gltfAnimChannel.sampler < 0 || gltfAnimChannel.sampler >= TINT( gltfAnim.samplers.size() ) ) continue;
 				auto& gltfAnimSampler = gltfAnim.samplers[ gltfAnimChannel.sampler ];
-				TASSERT( gltfModel.accessors[ gltfAnimSampler.input ].maxValues.empty() == TFALSE );
+
+				// Skip broken/foreign animations rather than crash - one bad model mustn't
+				// take down the whole batch
+				if ( gltfAnimSampler.input < 0 || gltfAnimSampler.input >= TINT( gltfModel.accessors.size() ) ) continue;
+				if ( gltfAnimSampler.output < 0 || gltfAnimSampler.output >= TINT( gltfModel.accessors.size() ) ) continue;
+				if ( gltfModel.accessors[ gltfAnimSampler.input ].maxValues.empty() ) continue;
 
 				const TFLOAT flKeyTime = TFLOAT( gltfModel.accessors[ gltfAnimSampler.input ].maxValues[ 0 ] );
 				flAnimDuration         = TMath::Max( flAnimDuration, flKeyTime );
@@ -670,8 +666,46 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		else
 			pModel->pKeyLib = Resource::StreamedKeyLib_Create( TPS8D( pModel->oSkeletonHeader.m_szTKLName ), *pTKLBuilder );
 
-		Model_PrepareAnimations( pModel.Get() );
+		Model_PrepareAnimations( pModel );
 	}
+}
+
+Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath )
+{
+	TINFO( "Importing skin model from GLTF file: %s\n", pchFilePath.Get() );
+
+	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
+
+	tinygltf::Model    gltfModel;
+	tinygltf::TinyGLTF gltfLoader;
+
+	std::string strError;
+	std::string strWarning;
+
+	TBOOL bLoadedGLTF = gltfLoader.LoadASCIIFromFile( &gltfModel, &strError, &strWarning, pchFilePath.Get() );
+	TASSERT( bLoadedGLTF == TTRUE );
+
+	if ( !bLoadedGLTF )
+	{
+		TERROR( "An error has occured while loading the GLTF file\n" );
+		if ( !strError.empty() ) TERROR( "ERROR: %s\n", strError.c_str() );
+		return {};
+	}
+
+	pModel->eModelType         = ModelType::Skin;
+	pModel->pTRB               = NULL;
+	pModel->iLODCount          = 1;
+	pModel->fRenderDistance    = 50.0f;
+	pModel->bAnimationsLoaded  = TFALSE;
+
+	ModelLoader_InitLODDistances( pModel->aLODDistances );
+
+	// We can't have more than 1 skins on a single model
+	TASSERT( gltfModel.skins.size() <= 1 );
+
+	T2Map<TINT, TINT> mapGltfBoneToTRVBone;
+	ModelLoader_LoadGLTFSkeleton( gltfModel, pModel.Get(), mapGltfBoneToTRVBone, pchFilePath );
+	const TBOOL bHasSkins = ( pModel->pSkeleton != TNULL );
 
 	// Calculate actual number of meshes per LOD.
 	// To make it clear, we count meshes only when materials differ, but Skinned models can have submeshes to fit all bones
@@ -931,7 +965,9 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 					for ( TINT s = 0; s < 4; s++ )
 					{
 						aiBones[ s ]    = fnJointToBone( pJoints[ s ] );
-						abAnimated[ s ] = aflWeights[ s ] >= ( 1.0f / 255.0f ) && pJoints[ s ];
+						// Gate on weight, NOT joint index: excluding slot 0 (the root body bone)
+						// made body verts rigid to it and swung the whole mesh around a wheel bone
+						abAnimated[ s ] = aflWeights[ s ] >= ( 1.0f / 255.0f );
 					}
 				};
 
@@ -955,7 +991,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 							if ( itMap != mapGlobalToLocal.End() )
 							{
-								vecLocalIndices.push_back( TUINT16( uiStartVertex + itMap->second ) );
+								vecLocalIndices.push_back( itMap->second );
 								continue;
 							}
 
@@ -1006,26 +1042,29 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 
 							mapGlobalToLocal.Insert( m, uiLocal );
 							vecVertices.PushBack( vtx );
-							vecLocalIndices.push_back( TUINT16( uiStartVertex + uiLocal ) );
+							vecLocalIndices.push_back( uiLocal );
 						}
 					}
 
 					TASSERT( mapUsedBones.Size() <= SKINNED_SUBMESH_MAX_BONES && "Bone-palette split failed" );
 
-					// The engine draws triangle strips, so stripify the group
-					PrimitiveGroup* pPrims    = TNULL;
-					TUINT16         iNumPrims = 0;
-					TBOOL           bResult   = GenerateStrips( vecLocalIndices.data(), TUINT( vecLocalIndices.size() ), &pPrims, &iNumPrims );
-					TASSERT( bResult == TTRUE && iNumPrims == 1 );
+					// Engine draws strips. This submesh owns its slice of vecVertices, so
+					// let the optimizer reorder those verts as well while stripifying.
+					std::vector<TUINT16> vecStrip;
+					MeshOptimize::StripifyTriangleList(
+					    vecLocalIndices.data(), TUINT( vecLocalIndices.size() ),
+					    &vecVertices[ uiStartVertex ], vecVertices.Size() - uiStartVertex, sizeof( SkinMesh::SkinVertex ),
+					    vecStrip );
+
+					// Indices came back local, shift them onto the shared buffer
+					for ( TUINT16& rIndex : vecStrip ) rIndex = TUINT16( uiStartVertex + rIndex );
 
 					T2VertexArray::Unbind();
 
-					pSubMesh->uiNumIndices  = pPrims->numIndices;
-					pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( pPrims->indices, pPrims->numIndices, GL_STATIC_DRAW );
+					pSubMesh->uiNumIndices  = TUINT( vecStrip.size() );
+					pSubMesh->oIndexBuffer  = T2Render::CreateIndexBuffer( vecStrip.data(), TUINT( vecStrip.size() ), GL_STATIC_DRAW );
 					pSubMesh->uiEndVertexId = vecVertices.Size();
 					pSubMesh->uiNumBones    = ( mapUsedBones.Size() == 0 ) ? TMath::Min( SKINNED_SUBMESH_MAX_BONES, TINT( mapGltfBoneToTRVBone.Size() ) ) : mapUsedBones.Size();
-
-					delete[] pPrims;
 
 					pSubMesh->oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, pSubMesh->oIndexBuffer );
 					pSubMesh->oVertexArray.Bind();
@@ -1103,6 +1142,190 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadSkin_GLTF( T
 		if ( !vecLODPositions.IsEmpty() )
 			pModel->aLODs[ iLODIdx ].BoundingSphere = ModelLoader_ComputeBoundingSphere( vecLODPositions );
 	}
+
+	return pModel;
+}
+
+Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadWorld_GLTF( Toshi::T2StringView pchFilePath, ModelType a_eModelType )
+{
+	TINFO( "Importing %s model from GLTF file: %s\n", GetModelTypeName( a_eModelType ), pchFilePath.Get() );
+
+	T2SharedPtr<ResourceLoader::Model> pModel = T2SharedPtr<ResourceLoader::Model>::New();
+
+	tinygltf::Model    gltfModel;
+	tinygltf::TinyGLTF gltfLoader;
+	std::string        strError, strWarning;
+
+	if ( !gltfLoader.LoadASCIIFromFile( &gltfModel, &strError, &strWarning, pchFilePath.Get() ) )
+	{
+		TERROR( "Failed to load world GLTF: %s\n", strError.c_str() );
+		return {};
+	}
+
+	pModel->eModelType        = a_eModelType;
+	pModel->pTRB              = TNULL;
+	pModel->iLODCount         = 1;
+	pModel->fRenderDistance   = 50.0f;
+	pModel->bAnimationsLoaded = TFALSE;
+	pModel->pSkeleton         = TNULL;
+	ModelLoader_InitLODDistances( pModel->aLODDistances );
+
+	// Collect renderable meshes (skip collision helpers)
+	T2DynamicVector<TINT> vecMeshes;
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		auto& rMesh = gltfModel.meshes[ i ];
+		if ( rMesh.primitives.empty() ) continue;
+
+		const TINT iMat = rMesh.primitives[ 0 ].material;
+		if ( iMat >= 0 && iMat < TINT( gltfModel.materials.size() ) && gltfModel.materials[ iMat ].name.rfind( "Collision_", 0 ) == 0 ) continue;
+
+		vecMeshes.PushBack( TINT( i ) );
+	}
+
+	TModelLOD& rLOD  = pModel->aLODs[ 0 ];
+	rLOD.iNumMeshes  = vecMeshes.Size();
+	rLOD.ppMeshes    = new TMesh*[ TMath::Max( 1, vecMeshes.Size() ) ];
+
+	MaterialCache             matCache;
+	T2DynamicVector<TVector3> vecAllPositions;
+
+	auto fnAccessor = [ & ]( TINT iAcc, const TBYTE*& rpData, TUINT& ruiStride, TUINT& ruiCount, TINT& riCompType, TINT& riNumComp ) {
+		auto& rAcc  = gltfModel.accessors[ iAcc ];
+		auto& rView = gltfModel.bufferViews[ rAcc.bufferView ];
+		rpData      = gltfModel.buffers[ rView.buffer ].data.data() + rView.byteOffset + rAcc.byteOffset;
+		riCompType  = rAcc.componentType;
+		riNumComp   = tinygltf::GetNumComponentsInType( rAcc.type );
+		ruiCount    = TUINT( rAcc.count );
+		const TUINT uiElem = TUINT( tinygltf::GetComponentSizeInBytes( rAcc.componentType ) ) * riNumComp;
+		ruiStride   = rView.byteStride ? rView.byteStride : uiElem;
+	};
+
+	for ( TINT m = 0; m < vecMeshes.Size(); m++ )
+	{
+		auto& rMesh = gltfModel.meshes[ vecMeshes[ m ] ];
+		auto& rPrim = rMesh.primitives[ 0 ];
+
+		WorldMesh* pMesh = g_pWorldShader->CreateMesh();
+		rLOD.ppMeshes[ m ] = pMesh;
+
+		const TINT   iMat        = rPrim.material;
+		std::string  strMatName  = ( iMat >= 0 ) ? gltfModel.materials[ iMat ].name : std::string( "NoMaterial" );
+		const TCHAR* pchTexture  = "NoTexture";
+		if ( iMat >= 0 && gltfModel.materials[ iMat ].pbrMetallicRoughness.baseColorTexture.index >= 0 )
+			pchTexture = gltfModel.images[ gltfModel.textures[ gltfModel.materials[ iMat ].pbrMetallicRoughness.baseColorTexture.index ].source ].uri.c_str();
+
+		T2SharedPtr<WorldMaterial> pMaterial;
+		if ( auto pCached = matCache.Find( strMatName.c_str() ) )
+			pMaterial = pCached;
+
+		if ( !pMaterial )
+		{
+			pMaterial     = g_pWorldShader->CreateMaterial();
+			auto pTexture = Resource::StreamedTexture_FindOrCreateDummy( TPS8D( pchTexture ) );
+			pMaterial->SetTexture( pTexture );
+			pMaterial->SetName( strMatName.c_str() );
+			pModel->vecUsedTextures.PushBack( pTexture );
+			matCache.Touch( strMatName.c_str(), pMaterial );
+		}
+
+		pMesh->SetName( strMatName.c_str() );
+		pMesh->SetMaterialName( strMatName.c_str() );
+		pMesh->SetMaterial( pMaterial );
+
+		const TBYTE* pPos = TNULL; TUINT uiPosStride = 0, uiCount = 0; TINT iPosCT = 0, iPosNC = 0;
+		fnAccessor( rPrim.attributes[ "POSITION" ], pPos, uiPosStride, uiCount, iPosCT, iPosNC );
+
+		const TBYTE* pNrm = TNULL; TUINT uiNrmStride = 0, uiNrmCount = 0; TINT iNrmCT = 0, iNrmNC = 0;
+		const TBOOL  bHasNrm = rPrim.attributes.count( "NORMAL" ) != 0;
+		if ( bHasNrm ) fnAccessor( rPrim.attributes[ "NORMAL" ], pNrm, uiNrmStride, uiNrmCount, iNrmCT, iNrmNC );
+
+		const TBYTE* pCol = TNULL; TUINT uiColStride = 0, uiColCount = 0; TINT iColCT = 0, iColNC = 0;
+		const TBOOL  bHasCol = rPrim.attributes.count( "COLOR_0" ) != 0;
+		if ( bHasCol ) fnAccessor( rPrim.attributes[ "COLOR_0" ], pCol, uiColStride, uiColCount, iColCT, iColNC );
+
+		const TBYTE* pUV = TNULL; TUINT uiUVStride = 0, uiUVCount = 0; TINT iUVCT = 0, iUVNC = 0;
+		const TBOOL  bHasUV = rPrim.attributes.count( "TEXCOORD_0" ) != 0;
+		if ( bHasUV ) fnAccessor( rPrim.attributes[ "TEXCOORD_0" ], pUV, uiUVStride, uiUVCount, iUVCT, iUVNC );
+
+		T2DynamicVector<WorldMesh::WorldVertex> vecVertices;
+		vecVertices.SetSize( uiCount );
+		for ( TUINT v = 0; v < uiCount; v++ )
+		{
+			WorldMesh::WorldVertex& rVtx = vecVertices[ v ];
+			rVtx.Position = *(const TVector3*)( pPos + uiPosStride * v );
+			rVtx.Normal   = bHasNrm ? *(const TVector3*)( pNrm + uiNrmStride * v ) : TVector3( 0.0f, 1.0f, 0.0f );
+			rVtx.UV       = bHasUV ? *(const TVector2*)( pUV + uiUVStride * v ) : TVector2( 0.0f, 0.0f );
+
+			if ( bHasCol && iColCT == TINYGLTF_COMPONENT_TYPE_FLOAT )
+			{
+				const TFLOAT* c = (const TFLOAT*)( pCol + uiColStride * v );
+				rVtx.Color = TVector3( c[ 0 ], c[ 1 ], c[ 2 ] );
+			}
+			else
+			{
+				rVtx.Color = TVector3( 1.0f, 1.0f, 1.0f );
+			}
+
+			vecAllPositions.PushBack( rVtx.Position );
+		}
+
+		const TBYTE* pIdx = TNULL; TUINT uiIdxStride = 0, uiNumIndices = 0; TINT iIdxCT = 0, iIdxNC = 0;
+		fnAccessor( rPrim.indices, pIdx, uiIdxStride, uiNumIndices, iIdxCT, iIdxNC );
+
+		auto fnReadIndex = [ & ]( TUINT j ) -> TUINT16 {
+			return ( iIdxCT == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT )
+			           ? *(const TUINT16*)( pIdx + uiIdxStride * j )
+			           : TUINT16( *(const TUINT32*)( pIdx + uiIdxStride * j ) );
+		};
+
+		T2DynamicVector<TUINT16> vecIndices;
+		if ( rPrim.mode == TINYGLTF_MODE_TRIANGLES )
+		{
+			T2DynamicVector<TUINT16> vecTris;
+			vecTris.SetSize( uiNumIndices );
+			for ( TUINT j = 0; j < uiNumIndices; j++ ) vecTris[ j ] = fnReadIndex( j );
+
+			// Merged world meshes can be disconnected, so stitch every piece into a
+			// single strip and let the vertices get reordered too
+			std::vector<TUINT16> vecStrip;
+			MeshOptimize::StripifyTriangleList(
+			    vecTris.Begin(), vecTris.Size(),
+			    vecVertices.Begin(), vecVertices.Size(), sizeof( WorldMesh::WorldVertex ),
+			    vecStrip );
+
+			vecIndices.SetSize( TUINT( vecStrip.size() ) );
+			if ( !vecStrip.empty() )
+				TUtil::MemCopy( vecIndices.Begin(), vecStrip.data(), vecStrip.size() * sizeof( TUINT16 ) );
+		}
+		else
+		{
+			vecIndices.SetSize( uiNumIndices );
+			for ( TUINT j = 0; j < uiNumIndices; j++ ) vecIndices[ j ] = fnReadIndex( j );
+		}
+
+		pMesh->oVertexBuffer = T2Render::CreateVertexBuffer( vecVertices.Begin(), vecVertices.Size() * sizeof( WorldMesh::WorldVertex ), GL_STATIC_DRAW );
+
+		auto& rSubMesh        = pMesh->vecSubMeshes.PushBack();
+		rSubMesh.uiNumIndices = vecIndices.Size();
+		rSubMesh.uiNumVertices = vecVertices.Size();
+
+		T2VertexArray::Unbind();
+		rSubMesh.oIndexBuffer  = T2Render::CreateIndexBuffer( vecIndices.Begin(), vecIndices.Size(), GL_STATIC_DRAW );
+		rSubMesh.oVertexArray  = T2Render::CreateVertexArray( pMesh->oVertexBuffer, rSubMesh.oIndexBuffer );
+		rSubMesh.oVertexArray.Bind();
+		rSubMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Position ) );
+		rSubMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Normal ) );
+		rSubMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Color ) );
+		rSubMesh.oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 2, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, UV ) );
+	}
+
+	pModel->aLODs[ 0 ].BoundingSphere = ModelLoader_ComputeBoundingSphere( vecAllPositions );
+
+	// World props carry a skeleton too (rigid root/instance bone). Load it so OnSaveWorld
+	// can write it back, else the game builds a null skeleton instance and crashes on render
+	T2Map<TINT, TINT> mapWorldBones;
+	ModelLoader_LoadGLTFSkeleton( gltfModel, pModel.Get(), mapWorldBones, pchFilePath );
 
 	return pModel;
 }

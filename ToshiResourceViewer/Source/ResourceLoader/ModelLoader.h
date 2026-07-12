@@ -120,6 +120,8 @@ struct ModelInstance
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_Windows( PTRB* pTRB );
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_Load_Barnyard_PS2( PTRB* pTRB );
 Toshi::T2SharedPtr<ResourceLoader::Model> Model_LoadSkin_GLTF( Toshi::T2StringView pchFilePath );
+// World and Grass share this loader and TRB layout - only the header shader enum differs
+Toshi::T2SharedPtr<ResourceLoader::Model> Model_LoadWorld_GLTF( Toshi::T2StringView pchFilePath, ModelType a_eModelType = ModelType::World );
 TBOOL                                     Model_PrepareAnimations( ResourceLoader::Model* pModel );
 TBOOL                                     Model_CreateInstance( Toshi::T2SharedPtr<ResourceLoader::Model> pModel, ModelInstance& rOutInstance );
 

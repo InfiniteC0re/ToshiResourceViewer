@@ -89,4 +89,5 @@ group "Main"
 	
 group "ThirdParty"
 	include "ThirdParty/ImGui"
+	include "ThirdParty/meshoptimizer"
 	include "OpenToshi/Toshi/Vendor/Opcode"

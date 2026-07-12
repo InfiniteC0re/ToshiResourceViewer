@@ -21,10 +21,16 @@ public:
 	virtual TBOOL OnCreate( Toshi::T2StringView pchFilePath ) OVERRIDE;
 	virtual TBOOL CanSave() OVERRIDE;
 	virtual TBOOL OnSave( PTRB* pOutTRB ) OVERRIDE;
+	TBOOL         OnSaveWorld( PTRB* pOutTRB );
+	// Writes SkeletonHeader + Skeleton symbols (shared by skin and world save paths)
+	void          WriteSkeletonSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB );
 	virtual void  OnDestroy() OVERRIDE;
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 
 	void  OnSaveTKL( PTRB* pOutTRB );
+	// Which loader an external .gltf uses (World/Grass -> world, else skin)
+	void  SetExternalGltfType( ResourceLoader::ModelType a_eType ) { m_eExternalGltfType = a_eType; }
+	TBOOL HasKeyLibrary() const { return m_ModelInstance.pModel.IsValid() && m_ModelInstance.pModel->pKeyLib.IsValid(); }
 	void  SetAutoSaveTKL( TBOOL bAutoSave ) { m_bAutoSaveTKL = bAutoSave; }
 	TBOOL ExportScene( tinygltf::Model& rOutModel );
 
@@ -46,7 +52,9 @@ private:
 	ResourceLoader::ModelInstance m_ModelInstance;
 	TINT                          m_iSelectedSequence;
 
-	TBOOL m_bAutoSaveTKL;
+	TBOOL  m_bAutoSaveTKL;
+	ResourceLoader::ModelType m_eExternalGltfType = ResourceLoader::ModelType::Skin;
+	TFLOAT m_fWorldChunkSize = 0.0f; // >0 tiles world meshes into cells of this size on compile
 
 	// Texture path per material name from the XML, used to override the (often
 	// stripped) glTF texture path on save

@@ -15,6 +15,7 @@ IncludeDir.sdl2 = "%{wks.location}/OpenToshi/Toshi/Vendor/sdl2/include"
 IncludeDir.toshi = "%{wks.location}/OpenToshi/Toshi/Source"
 IncludeDir.opcode = "%{wks.location}/OpenToshi/Toshi/Vendor/Opcode/Source"
 IncludeDir.imgui = "%{wks.location}/ThirdParty/ImGui"
+IncludeDir.meshoptimizer = "%{wks.location}/ThirdParty/meshoptimizer"
 IncludeDir.assimp = "%{wks.location}/ToshiResourceViewer/Vendor/assimp/include"
 
 LibDir = {}
