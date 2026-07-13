@@ -1867,7 +1867,8 @@ void ModelResourceView::SerializeModelInformation( tinyxml2::XMLDocument* pOutpu
 	auto pTMDLElem = pOutput->NewElement( "TMDL" );
 	pOutput->InsertEndChild( pTMDLElem );
 
-	pTMDLElem->SetAttribute( "Target", "Win" );
+	const TOSHISKU eSKU = g_oTheApp.GetSelectedPlatform();
+	pTMDLElem->SetAttribute( "Target", eSKU == TOSHISKU_WINDOWS ? "Win" : eSKU == TOSHISKU_REV ? "Rev" : eSKU == TOSHISKU_PS2 ? "PS2" :"Unknown" );
 	pTMDLElem->SetAttribute( "Name", m_strFileName.Mid( 0, m_strFileName.FindReverse( '.' ) ).GetString() );
 	pTMDLElem->SetAttribute( "Type", ResourceLoader::GetModelTypeName( m_ModelInstance.pModel->eModelType ) );
 

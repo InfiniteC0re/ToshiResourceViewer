@@ -16,12 +16,16 @@ TOSHI_NAMESPACE_USING
 
 void ResourcePipeline::DecompileResources( const DecompileOptions& rOptions )
 {
-	const TBOOL    bMerge           = rOptions.bMerge;
-	const TBOOL    bModels          = rOptions.bModels;
-	const TBOOL    bMatlibs         = rOptions.bMatlibs;
-	const TString8 strOutputPath    = rOptions.strOutputPath;
-	const TString8 strInputFilePath = rOptions.strInputPath;
-	const TString8 strInputFileName = rOptions.strInputName;
+	const TBOOL bMerge           = rOptions.bMerge;
+	const TBOOL bModels          = rOptions.bModels;
+	const TBOOL bMatlibs         = rOptions.bMatlibs;
+	TString8    strOutputPath    = rOptions.strOutputPath;
+	TString8    strInputFilePath = rOptions.strInputPath;
+	TString8    strInputFileName = rOptions.strInputName;
+
+	FixPathSlashes( strOutputPath );
+	FixPathSlashes( strInputFilePath );
+	FixPathSlashes( strInputFileName );
 
 	struct DecompiledModel
 	{
@@ -739,6 +743,9 @@ void ResourcePipeline::DecompileResources( const DecompileOptions& rOptions )
 		PTRB oInTRB;
 
 		if ( oInTRB.ReadFromFile( strInputFileName.GetString() ) )
+		{
+			fnMoveCursor();
 			fnExportResource( oInTRB, strInputFileName );
+		}
 	}
 }

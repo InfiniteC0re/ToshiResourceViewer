@@ -16,6 +16,11 @@ TOSHI_NAMESPACE_USING
 
 void HeadlessMain( TINT argc, TCHAR** argv )
 {
+	if ( g_pCmd->HasParameter( "-ps2" ) )
+		g_oTheApp.SetSelectedPlatform( TOSHISKU_PS2 );
+	else if ( g_pCmd->HasParameter( "-rev" ) )
+		g_oTheApp.SetSelectedPlatform( TOSHISKU_REV );
+
 	TString8 strOutputPath    = g_pCmd->GetParameterValue( "-output" );
 	TString8 strInputFilePath = g_pCmd->GetParameterValue( "-input" );
 
