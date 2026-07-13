@@ -143,7 +143,8 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 		WorldMesh::WorldVertex* pVertices   = new WorldMesh::WorldVertex[ uiTotalVerts ];
 		TUINT                   uiVtxOffset = 0;
 
-		// First pass: decode quantised int16 positions/UVs and accumulate face normals
+		// First pass: decode quantised int16 positions/UVs/colours into the shared
+		// vertex buffer (normals are accumulated from the triangles below)
 		for ( TUINT s = 0; s < uiNumSubMeshes; s++ )
 		{
 			TTMDPS2::StaticInstance::SubMesh& subMesh = pTRBMesh->m_pSubMeshes[ s ];
@@ -169,48 +170,63 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 				dst.UV.y                    = pUVData[ v * 2 + 1 ] * TTMDPS2::StaticInstance::UV_SCALE;
 			}
 
-			// Walk the u8 triangle strip to accumulate face normals per vertex
-			const TUINT8* pIdxData = subMesh.m_pIndices + TTMDPS2::StaticInstance::INDEX_HDR_SIZE;
-			TUINT         NI       = subMesh.m_uiNumIndices;
-			TINT          stripLen = 0;
-			TUINT8        win[ 2 ] = {};
+			uiVtxOffset += NV;
+		}
+
+		auto fnDecodeTriangles = [ &pVertices ]( const TTMDPS2::StaticInstance::SubMesh& a_rSubMesh, TUINT a_uiVtxOffset, auto&& a_fnEmit ) {
+			const TUINT8* pIdxData = a_rSubMesh.m_pIndices + TTMDPS2::StaticInstance::INDEX_HDR_SIZE;
+			const TUINT   NI       = a_rSubMesh.m_uiNumIndices;
+			TUINT8        uiPrev2  = 0;
+			TUINT8        uiPrev1  = 0;
 
 			for ( TUINT k = 0; k < NI; k++ )
 			{
-				TUINT8 raw = pIdxData[ k ];
-				TUINT8 vi  = raw & 0x7F;
-				TBOOL  adc = ( raw & 0x80 ) != 0;
+				const TUINT8 uiRaw = pIdxData[ k ];
+				const TUINT8 vi    = uiRaw & 0x7F;
+				const TBOOL  bSkip = ( uiRaw & 0x80 ) != 0;
 
-				if ( adc )
+				// Skip suppressed kicks and degenerate (repeated-vertex) triangles
+				if ( k >= 2 && !bSkip && vi != uiPrev1 && vi != uiPrev2 && uiPrev1 != uiPrev2 )
 				{
-					win[ 0 ] = vi;
-					stripLen = 1;
-				}
-				else if ( stripLen < 2 )
-				{
-					win[ stripLen++ ] = vi;
-				}
-				else
-				{
-					TVector3& pa = pVertices[ uiVtxOffset + win[ 0 ] ].Position;
-					TVector3& pb = pVertices[ uiVtxOffset + win[ 1 ] ].Position;
-					TVector3& pc = pVertices[ uiVtxOffset + vi ].Position;
+					TUINT8 a = uiPrev2;
+					TUINT8 b = uiPrev1;
 
-					TVector3 edge1( pb.x - pa.x, pb.y - pa.y, pb.z - pa.z );
-					TVector3 edge2( pc.x - pa.x, pc.y - pa.y, pc.z - pa.z );
-					TVector3 faceNormal;
-					faceNormal.CrossProduct( edge1, edge2 );
+					// Odd strip position flips winding; swap to keep it consistent
+					if ( k & 1 )
+					{
+						const TUINT8 t = a;
+						a              = b;
+						b              = t;
+					}
 
-					pVertices[ uiVtxOffset + win[ 0 ] ].Normal += faceNormal;
-					pVertices[ uiVtxOffset + win[ 1 ] ].Normal += faceNormal;
-					pVertices[ uiVtxOffset + vi ].Normal += faceNormal;
-
-					win[ 0 ] = win[ 1 ];
-					win[ 1 ] = vi;
+					a_fnEmit( TUINT16( a + a_uiVtxOffset ), TUINT16( b + a_uiVtxOffset ), TUINT16( vi + a_uiVtxOffset ) );
 				}
+
+				uiPrev2 = uiPrev1;
+				uiPrev1 = vi;
 			}
+		};
 
-			uiVtxOffset += NV;
+		// First index pass: accumulate face normals per vertex
+		uiVtxOffset = 0;
+		for ( TUINT s = 0; s < uiNumSubMeshes; s++ )
+		{
+			fnDecodeTriangles( pTRBMesh->m_pSubMeshes[ s ], uiVtxOffset, [ & ]( TUINT16 ia, TUINT16 ib, TUINT16 ic ) {
+				TVector3& pa = pVertices[ ia ].Position;
+				TVector3& pb = pVertices[ ib ].Position;
+				TVector3& pc = pVertices[ ic ].Position;
+
+				TVector3 edge1( pb.x - pa.x, pb.y - pa.y, pb.z - pa.z );
+				TVector3 edge2( pc.x - pa.x, pc.y - pa.y, pc.z - pa.z );
+				TVector3 faceNormal;
+				faceNormal.CrossProduct( edge1, edge2 );
+
+				pVertices[ ia ].Normal += faceNormal;
+				pVertices[ ib ].Normal += faceNormal;
+				pVertices[ ic ].Normal += faceNormal;
+			} );
+
+			uiVtxOffset += pTRBMesh->m_pSubMeshes[ s ].m_uiNumVertices;
 		}
 
 		// Normalize the accumulated vertex normals; fall back to up-vector if degenerate
@@ -231,7 +247,7 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 		);
 		delete[] pVertices;
 
-		// Second pass: expand each sub-mesh's u8 strip into a TUINT16 triangle list
+		// Second index pass: build and upload each sub-mesh's triangle list
 		pMesh->vecSubMeshes.Reserve( uiNumSubMeshes );
 		uiVtxOffset = 0;
 
@@ -239,52 +255,34 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 		{
 			TTMDPS2::StaticInstance::SubMesh& subMesh = pTRBMesh->m_pSubMeshes[ s ];
 
-			TUINT NV = subMesh.m_uiNumVertices;
-			TUINT NI = subMesh.m_uiNumIndices;
+			Toshi::T2DynamicVector<TUINT16> vecIndices;
+			vecIndices.Reserve( subMesh.m_uiNumIndices * 3 );
 
-			TUINT16*      pStripBuf    = new TUINT16[ NI * 2 ];
-			TUINT         uiStripCount = 0;
+			fnDecodeTriangles( subMesh, uiVtxOffset, [ & ]( TUINT16 ia, TUINT16 ib, TUINT16 ic ) {
+				vecIndices.PushBack( ia );
+				vecIndices.PushBack( ib );
+				vecIndices.PushBack( ic );
+			} );
 
-			const TUINT8* pIdxData = subMesh.m_pIndices + TTMDPS2::StaticInstance::INDEX_HDR_SIZE;
-			for ( TUINT k = 0; k < NI; k++ )
-			{
-				TUINT8  uiRaw       = pIdxData[ k ];
-				TBOOL   bDegenerate = ( uiRaw & 0x80 ) != 0;
-				TUINT16 uiIdx       = TUINT16( ( uiRaw & 0x7F ) + uiVtxOffset );
+			uiVtxOffset += subMesh.m_uiNumVertices;
 
-				if ( bDegenerate && k != 0 )
-				{
-					pStripBuf[ uiStripCount ] = pStripBuf[ uiStripCount - 1 ];
-					uiStripCount++;
+			if ( vecIndices.Size() == 0 )
+				continue;
 
-					pStripBuf[ uiStripCount ] = uiIdx;
-					uiStripCount++;
-				}
-				else
-				{
-					pStripBuf[ uiStripCount++ ] = uiIdx;
-				}
-			}
+			auto& sm         = pMesh->vecSubMeshes.PushBack();
+			sm.uiNumIndices  = TUINT32( vecIndices.Size() );
+			sm.uiNumVertices = subMesh.m_uiNumVertices;
+			sm.bTriangleList = TTRUE;
 
-			if ( uiStripCount > 0 )
-			{
-				auto& sm         = pMesh->vecSubMeshes.PushBack();
-				sm.uiNumIndices  = uiStripCount;
-				sm.uiNumVertices = NV;
+			T2VertexArray::Unbind();
 
-				T2VertexArray::Unbind();
-
-				sm.oIndexBuffer = T2Render::CreateIndexBuffer( pStripBuf, uiStripCount, GL_STATIC_DRAW );
-				sm.oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, sm.oIndexBuffer );
-				sm.oVertexArray.Bind();
-				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Position ) );
-				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Normal ) );
-				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Color ) );
-				sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 2, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, UV ) );
-			}
-
-			delete[] pStripBuf;
-			uiVtxOffset += NV;
+			sm.oIndexBuffer = T2Render::CreateIndexBuffer( vecIndices.Begin(), sm.uiNumIndices, GL_STATIC_DRAW );
+			sm.oVertexArray = T2Render::CreateVertexArray( pMesh->oVertexBuffer, sm.oIndexBuffer );
+			sm.oVertexArray.Bind();
+			sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 0, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Position ) );
+			sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 1, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Normal ) );
+			sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 2, 3, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, Color ) );
+			sm.oVertexArray.GetVertexBuffer().SetAttribPointer( 3, 2, GL_FLOAT, sizeof( WorldMesh::WorldVertex ), offsetof( WorldMesh::WorldVertex, UV ) );
 		}
 	}
 }

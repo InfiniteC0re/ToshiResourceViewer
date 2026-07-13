@@ -23,6 +23,7 @@ public:
 		Toshi::T2VertexArray oVertexArray;
 		TUINT32              uiNumIndices;
 		TUINT32              uiNumVertices;
+		TBOOL                bTriangleList = TFALSE;
 	};
 
 	struct WorldVertex

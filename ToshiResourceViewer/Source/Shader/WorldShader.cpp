@@ -136,7 +136,7 @@ void WorldShader::Render( TRenderPacket* a_pRenderPacket )
 		T2_FOREACH( pWorldMesh->vecSubMeshes, subMesh )
 		{
 			subMesh->oVertexArray.Bind();
-			glDrawElements( GL_TRIANGLE_STRIP, subMesh->uiNumIndices, GL_UNSIGNED_SHORT, NULL );
+			glDrawElements( subMesh->bTriangleList ? GL_TRIANGLES : GL_TRIANGLE_STRIP, subMesh->uiNumIndices, GL_UNSIGNED_SHORT, NULL );
 		}
 	}
 }
@@ -369,7 +369,7 @@ TBOOL WorldMesh::SerializeGLTFMesh( tinygltf::Model& a_rOutModel, TSkeletonInsta
 		gltfPrimitive.attributes[ "COLOR_0" ]    = iAccColorIndex;
 		gltfPrimitive.attributes[ "TEXCOORD_0" ] = iAccUVIndex;
 		gltfPrimitive.indices                    = iAccIndicesIndex;
-		gltfPrimitive.mode                       = TINYGLTF_MODE_TRIANGLE_STRIP;
+		gltfPrimitive.mode                       = it->bTriangleList ? TINYGLTF_MODE_TRIANGLES : TINYGLTF_MODE_TRIANGLE_STRIP;
 		gltfPrimitive.material                   = iMaterialIndex;
 
 		gltfMesh.primitives.push_back( std::move( gltfPrimitive ) );
