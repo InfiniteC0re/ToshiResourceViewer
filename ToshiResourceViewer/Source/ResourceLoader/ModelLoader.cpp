@@ -1265,9 +1265,60 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadWorld_GLTF( 
 		const TBOOL  bHasNrm = rPrim.attributes.count( "NORMAL" ) != 0;
 		if ( bHasNrm ) fnAccessor( rPrim.attributes[ "NORMAL" ], pNrm, uiNrmStride, uiNrmCount, iNrmCT, iNrmNC );
 
-		const TBYTE* pCol = TNULL; TUINT uiColStride = 0, uiColCount = 0; TINT iColCT = 0, iColNC = 0;
-		const TBOOL  bHasCol = rPrim.attributes.count( "COLOR_0" ) != 0;
-		if ( bHasCol ) fnAccessor( rPrim.attributes[ "COLOR_0" ], pCol, uiColStride, uiColCount, iColCT, iColNC );
+		auto fnDecodeColor = [ & ]( const TCHAR* pszAttr, T2DynamicVector<TVector3>& rOut, TINT& riNumComp, TBOOL& rbNonWhite ) -> TBOOL {
+			riNumComp  = 0;
+			rbNonWhite = TFALSE;
+			if ( rPrim.attributes.count( pszAttr ) == 0 ) return TFALSE;
+
+			const TBYTE* pData = TNULL; TUINT uiStride = 0, uiCnt = 0; TINT iCT = 0, iNC = 0;
+			fnAccessor( rPrim.attributes[ pszAttr ], pData, uiStride, uiCnt, iCT, iNC );
+			riNumComp = iNC;
+
+			rOut.SetSize( uiCnt );
+			for ( TUINT v = 0; v < uiCnt; v++ )
+			{
+				const TBYTE* p        = pData + uiStride * v;
+				TFLOAT       rgb[ 3 ] = { 1.0f, 1.0f, 1.0f };
+				for ( TINT c = 0; c < 3 && c < iNC; c++ )
+				{
+					switch ( iCT )
+					{
+						case TINYGLTF_COMPONENT_TYPE_FLOAT:          rgb[ c ] = ( (const TFLOAT*)p )[ c ]; break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  rgb[ c ] = ( (const TUINT8*)p )[ c ] / 255.0f; break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: rgb[ c ] = ( (const TUINT16*)p )[ c ] / 65535.0f; break;
+						default: break;
+					}
+				}
+				rOut[ v ] = TVector3( rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+				if ( rgb[ 0 ] < 0.999f || rgb[ 1 ] < 0.999f || rgb[ 2 ] < 0.999f ) rbNonWhite = TTRUE;
+			}
+			return TTRUE;
+		};
+
+		T2DynamicVector<TVector3> vecColors;
+		vecColors.SetSize( uiCount );
+		for ( TUINT v = 0; v < uiCount; v++ ) vecColors[ v ] = TVector3( 1.0f, 1.0f, 1.0f );
+
+		{
+			T2DynamicVector<TVector3> aCandCols[ 2 ];
+			TINT                      aCandNumComp[ 2 ]  = { 0, 0 };
+			TBOOL                     aCandNonWhite[ 2 ] = { TFALSE, TFALSE };
+			const TBOOL               abHas[ 2 ]         = {
+                fnDecodeColor( "COLOR_0", aCandCols[ 0 ], aCandNumComp[ 0 ], aCandNonWhite[ 0 ] ),
+                fnDecodeColor( "COLOR_1", aCandCols[ 1 ], aCandNumComp[ 1 ], aCandNonWhite[ 1 ] ),
+            };
+
+			TINT iBest = -1, iBestScore = -1;
+			for ( TINT i = 0; i < 2; i++ )
+			{
+				if ( !abHas[ i ] || aCandCols[ i ].Size() != uiCount ) continue;
+				const TINT iScore = ( aCandNumComp[ i ] >= 4 ? 2 : 0 ) + ( aCandNonWhite[ i ] ? 1 : 0 );
+				if ( iScore > iBestScore ) { iBestScore = iScore; iBest = i; }
+			}
+
+			if ( iBest != -1 )
+				for ( TUINT v = 0; v < uiCount; v++ ) vecColors[ v ] = aCandCols[ iBest ][ v ];
+		}
 
 		const TBYTE* pUV = TNULL; TUINT uiUVStride = 0, uiUVCount = 0; TINT iUVCT = 0, iUVNC = 0;
 		const TBOOL  bHasUV = rPrim.attributes.count( "TEXCOORD_0" ) != 0;
@@ -1281,16 +1332,7 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadWorld_GLTF( 
 			rVtx.Position = *(const TVector3*)( pPos + uiPosStride * v );
 			rVtx.Normal   = bHasNrm ? *(const TVector3*)( pNrm + uiNrmStride * v ) : TVector3( 0.0f, 1.0f, 0.0f );
 			rVtx.UV       = bHasUV ? *(const TVector2*)( pUV + uiUVStride * v ) : TVector2( 0.0f, 0.0f );
-
-			if ( bHasCol && iColCT == TINYGLTF_COMPONENT_TYPE_FLOAT )
-			{
-				const TFLOAT* c = (const TFLOAT*)( pCol + uiColStride * v );
-				rVtx.Color = TVector3( c[ 0 ], c[ 1 ], c[ 2 ] );
-			}
-			else
-			{
-				rVtx.Color = TVector3( 1.0f, 1.0f, 1.0f );
-			}
+			rVtx.Color    = vecColors[ v ];
 
 			vecAllPositions.PushBack( rVtx.Position );
 		}
