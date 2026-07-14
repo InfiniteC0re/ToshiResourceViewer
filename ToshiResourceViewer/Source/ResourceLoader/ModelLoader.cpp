@@ -310,7 +310,7 @@ static void ModelLoader_LoadGLTFSkeleton( const tinygltf::Model& gltfModel, Reso
 
 				TSIZE iGltfAnim = TSIZE( -1 );
 				for ( TSIZE i = 0; i < gltfModel.animations.size(); i++ )
-					if ( rEntry.first.CompareNoCase( gltfModel.animations[ i ].name.c_str() ) == 0 ) { iGltfAnim = i; break; }
+					if ( rEntry.first.Compare( gltfModel.animations[ i ].name.c_str() ) == 0 ) { iGltfAnim = i; break; }
 
 				if ( iGltfAnim == TSIZE( -1 ) )
 				{
@@ -335,7 +335,7 @@ static void ModelLoader_LoadGLTFSkeleton( const tinygltf::Model& gltfModel, Reso
 					// Check the name is already in the list
 					TBOOL bDuplicate = TFALSE;
 					for ( TINT k = 0; !bDuplicate && k < vecAnimations.Size(); k++ )
-						bDuplicate = ( vecAnimations[ k ].second.CompareNoCase( strAnimName.c_str() ) == 0 );
+						bDuplicate = ( vecAnimations[ k ].second.Compare( strAnimName.c_str() ) == 0 );
 
 					if ( bDuplicate ) continue;
 				}
