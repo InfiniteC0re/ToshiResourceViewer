@@ -24,6 +24,8 @@ public:
 	TBOOL         OnSaveWorld( PTRB* pOutTRB );
 	// Writes SkeletonHeader + Skeleton symbols (shared by skin and world save paths)
 	void          WriteSkeletonSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB );
+	// Writes the Collision header/meshes + baked CollisionTree (shared by skin and world save paths)
+	void          WriteCollisionSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB );
 	virtual void  OnDestroy() OVERRIDE;
 	virtual void  OnRender( TFLOAT flDeltaTime ) OVERRIDE;
 

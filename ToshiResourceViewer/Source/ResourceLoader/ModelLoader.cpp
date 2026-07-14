@@ -109,6 +109,31 @@ static void ModelLoader_MarkGLTFCollisionMeshes( const tinygltf::Model& gltfMode
 		ModelLoader_MarkGLTFCollisionMeshes( gltfModel, gltfNode.children[ i ], vecCollisionMeshes );
 }
 
+// Builds the per-mesh collision mask: a mesh is collision if it hangs under a "Collision"
+// node or its material is a "Collision_*" material. Shared by the skin and world loaders
+static void ModelLoader_BuildGLTFCollisionMask( const tinygltf::Model& gltfModel, T2DynamicVector<TBOOL>& vecCollisionMeshes )
+{
+	vecCollisionMeshes.SetSize( gltfModel.meshes.size() );
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+		vecCollisionMeshes[ i ] = TFALSE;
+
+	for ( TSIZE i = 0; i < gltfModel.nodes.size(); i++ )
+	{
+		if ( gltfModel.nodes[ i ].name == "Collision" )
+			ModelLoader_MarkGLTFCollisionMeshes( gltfModel, TINT( i ), vecCollisionMeshes );
+	}
+
+	for ( TSIZE i = 0; i < gltfModel.meshes.size(); i++ )
+	{
+		auto& gltfMesh = gltfModel.meshes[ i ];
+		if ( gltfMesh.primitives.empty() ) continue;
+
+		const TINT iMaterial = gltfMesh.primitives[ 0 ].material;
+		if ( iMaterial >= 0 && iMaterial < TINT( gltfModel.materials.size() ) && gltfModel.materials[ iMaterial ].name.rfind( "Collision_", 0 ) == 0 )
+			vecCollisionMeshes[ i ] = TTRUE;
+	}
+}
+
 static TUINT16 ModelLoader_ReadGLTFIndex( const tinygltf::Buffer& gltfBuffer, const tinygltf::BufferView& gltfBufferView, const tinygltf::Accessor& gltfAccessor, TUINT iIndex )
 {
 	const TUINT uiStride = ( gltfBufferView.byteStride != 0 ) ? gltfBufferView.byteStride : tinygltf::GetComponentSizeInBytes( gltfAccessor.componentType );
@@ -1326,6 +1351,14 @@ Toshi::T2SharedPtr<ResourceLoader::Model> ResourceLoader::Model_LoadWorld_GLTF( 
 	// can write it back, else the game builds a null skeleton instance and crashes on render
 	T2Map<TINT, TINT> mapWorldBones;
 	ModelLoader_LoadGLTFSkeleton( gltfModel, pModel.Get(), mapWorldBones, pchFilePath );
+
+	// World props (nb_/bn_ barn objects, carracefinish, gates, ...) carry collision too.
+	// Load it so OnSave writes the Collision mesh + baked CollisionTree, else the re-saved
+	// TRB has 0 collision meshes and the object loses in-game collision (and the game can
+	// crash where it relies on it, e.g. the car race finish line)
+	T2DynamicVector<TBOOL> vecCollisionMeshes;
+	ModelLoader_BuildGLTFCollisionMask( gltfModel, vecCollisionMeshes );
+	ModelLoader_LoadGLTFCollisionMeshes( gltfModel, pModel.Get(), vecCollisionMeshes );
 
 	return pModel;
 }

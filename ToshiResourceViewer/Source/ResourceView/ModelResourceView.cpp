@@ -207,6 +207,84 @@ TBOOL ModelResourceView::CanSave()
 
 // Writes the SkeletonHeader + Skeleton symbols. Shared by the skin and world save paths;
 // writes nothing for a skeleton-less model (collision-only containers)
+void ModelResourceView::WriteCollisionSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB )
+{
+	T2SharedPtr<ResourceLoader::Model> pModel = m_ModelInstance.pModel;
+
+	auto pTRBCollision          = pMemStream->Alloc<TTMDBase::CollisionHeader>();
+	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( pModel->iNumCollisionMeshes );
+
+	if ( pModel->iNumCollisionMeshes > 0 )
+	{
+		auto pTRBCollisionMeshes = pMemStream->Alloc<TTMDBase::CollisionMesh>( &pTRBCollision->m_pMeshes, pModel->iNumCollisionMeshes );
+
+		for ( TINT i = 0; i < pModel->iNumCollisionMeshes; i++ )
+		{
+			auto& rCollisionMesh = pModel->pCollisionMeshes[ i ];
+			auto  pTRBMesh       = pTRBCollisionMeshes + i;
+
+			const TUINT uiNumVertices = rCollisionMesh.vecVertices.Size();
+			const TUINT uiNumIndices  = rCollisionMesh.vecIndices.Size();
+			const TUINT uiNumGroups   = rCollisionMesh.vecGroups.Size();
+
+			pTRBMesh->m_iBoneID        = pOutTRB->ConvertEndianess( rCollisionMesh.iBoneID );
+			pTRBMesh->m_uiNumVertices  = pOutTRB->ConvertEndianess( uiNumVertices );
+			pTRBMesh->m_uiNumIndices   = pOutTRB->ConvertEndianess( uiNumIndices );
+			pTRBMesh->m_uiNumCollTypes = pOutTRB->ConvertEndianess( uiNumGroups );
+
+			auto pTRBVertices = pMemStream->Alloc<TVector3>( &pTRBMesh->m_pVertices, uiNumVertices );
+			for ( TUINT k = 0; k < uiNumVertices; k++ )
+			{
+				auto pTRBVertex = pTRBVertices + k;
+				pTRBVertex->x   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].x );
+				pTRBVertex->y   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].y );
+				pTRBVertex->z   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].z );
+			}
+
+			auto pTRBIndices = pMemStream->Alloc<TUINT16>( &pTRBMesh->m_pIndices, uiNumIndices );
+			for ( TUINT k = 0; k < uiNumIndices; k++ )
+			{
+				*( pTRBIndices + k ) = pOutTRB->ConvertEndianess( rCollisionMesh.vecIndices[ k ] );
+			}
+
+			auto pTRBGroups = pMemStream->Alloc<TTMDBase::CollisionGroup>( &pTRBMesh->m_pCollGroups, uiNumGroups );
+			for ( TUINT k = 0; k < uiNumGroups; k++ )
+			{
+				auto& rCollisionGroup = rCollisionMesh.vecGroups[ k ];
+				auto  pTRBGroup       = pTRBGroups + k;
+
+				const TUINT uiNameLength = rCollisionGroup.strName.Length() + 1;
+				auto        pTRBName     = pMemStream->AllocBytes( uiNameLength );
+				T2String8::Copy( pTRBName.get(), rCollisionGroup.strName.GetString(), uiNameLength );
+				pMemStream->WritePointer( const_cast<TCHAR**>( &pTRBGroup->pszName ), pTRBName );
+
+				pTRBGroup->iUnk1      = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->iUnk3      = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->uiNumFaces = pOutTRB->ConvertEndianess( rCollisionGroup.uiNumFaces );
+				pTRBGroup->iSomeCount = pOutTRB->ConvertEndianess( 0 );
+				pTRBGroup->pS1        = TNULL;
+			}
+		}
+	}
+	else
+	{
+		pTRBCollision->m_pMeshes = TNULL;
+	}
+
+	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
+
+	if ( pModel->iNumCollisionMeshes > 0 )
+	{
+		auto& rMesh = pModel->pCollisionMeshes[ 0 ];
+		if ( rMesh.vecVertices.Size() > 0 && rMesh.vecIndices.Size() >= 6 )
+			CollisionTreeBuilder::WriteCollisionTree(
+			    pOutTRB, pMemStream, pSYMB,
+			    &rMesh.vecVertices[ 0 ], rMesh.vecVertices.Size(),
+			    &rMesh.vecIndices[ 0 ], rMesh.vecIndices.Size()
+			);
+	}
+}
+
 void ModelResourceView::WriteSkeletonSymbols( PTRB* pOutTRB, PTRBSections::MemoryStream* pMemStream, PTRBSymbols* pSYMB )
 {
 	TSkeletonInstance* pSkeletonInstance = m_ModelInstance.pSkeletonInstance;
@@ -377,81 +455,7 @@ TBOOL ModelResourceView::OnSave( PTRB* pOutTRB )
 
 	pSYMB->Add( pMemStream, "Materials", pTRBMaterialsHeader.get() );
 
-	// Write collision
-	auto pTRBCollision          = pMemStream->Alloc<TTMDBase::CollisionHeader>();
-	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( pModel->iNumCollisionMeshes );
-
-	if ( pModel->iNumCollisionMeshes > 0 )
-	{
-		auto pTRBCollisionMeshes = pMemStream->Alloc<TTMDBase::CollisionMesh>( &pTRBCollision->m_pMeshes, pModel->iNumCollisionMeshes );
-
-		for ( TINT i = 0; i < pModel->iNumCollisionMeshes; i++ )
-		{
-			auto& rCollisionMesh = pModel->pCollisionMeshes[ i ];
-			auto  pTRBMesh       = pTRBCollisionMeshes + i;
-
-			const TUINT uiNumVertices = rCollisionMesh.vecVertices.Size();
-			const TUINT uiNumIndices  = rCollisionMesh.vecIndices.Size();
-			const TUINT uiNumGroups   = rCollisionMesh.vecGroups.Size();
-
-			pTRBMesh->m_iBoneID        = pOutTRB->ConvertEndianess( rCollisionMesh.iBoneID );
-			pTRBMesh->m_uiNumVertices  = pOutTRB->ConvertEndianess( uiNumVertices );
-			pTRBMesh->m_uiNumIndices   = pOutTRB->ConvertEndianess( uiNumIndices );
-			pTRBMesh->m_uiNumCollTypes = pOutTRB->ConvertEndianess( uiNumGroups );
-
-			auto pTRBVertices = pMemStream->Alloc<TVector3>( &pTRBMesh->m_pVertices, uiNumVertices );
-			for ( TUINT k = 0; k < uiNumVertices; k++ )
-			{
-				auto pTRBVertex = pTRBVertices + k;
-				pTRBVertex->x   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].x );
-				pTRBVertex->y   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].y );
-				pTRBVertex->z   = pOutTRB->ConvertEndianess( rCollisionMesh.vecVertices[ k ].z );
-			}
-
-			auto pTRBIndices = pMemStream->Alloc<TUINT16>( &pTRBMesh->m_pIndices, uiNumIndices );
-			for ( TUINT k = 0; k < uiNumIndices; k++ )
-			{
-				*( pTRBIndices + k ) = pOutTRB->ConvertEndianess( rCollisionMesh.vecIndices[ k ] );
-			}
-
-			auto pTRBGroups = pMemStream->Alloc<TTMDBase::CollisionGroup>( &pTRBMesh->m_pCollGroups, uiNumGroups );
-			for ( TUINT k = 0; k < uiNumGroups; k++ )
-			{
-				auto& rCollisionGroup = rCollisionMesh.vecGroups[ k ];
-				auto  pTRBGroup       = pTRBGroups + k;
-
-				const TUINT uiNameLength = rCollisionGroup.strName.Length() + 1;
-				auto        pTRBName     = pMemStream->AllocBytes( uiNameLength );
-				T2String8::Copy( pTRBName.get(), rCollisionGroup.strName.GetString(), uiNameLength );
-				pMemStream->WritePointer( const_cast<TCHAR**>( &pTRBGroup->pszName ), pTRBName );
-
-				pTRBGroup->iUnk1      = pOutTRB->ConvertEndianess( 0 );
-				pTRBGroup->iUnk3      = pOutTRB->ConvertEndianess( 0 );
-				pTRBGroup->uiNumFaces = pOutTRB->ConvertEndianess( rCollisionGroup.uiNumFaces );
-				pTRBGroup->iSomeCount = pOutTRB->ConvertEndianess( 0 );
-				pTRBGroup->pS1        = TNULL;
-			}
-		}
-	}
-	else
-	{
-		pTRBCollision->m_pMeshes = TNULL;
-	}
-
-	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
-
-	// Bake the collision tree - the engine expects it prebaked. Models only ever
-	// have a single collision mesh
-	if ( pModel->iNumCollisionMeshes > 0 )
-	{
-		auto& rMesh = pModel->pCollisionMeshes[ 0 ];
-		if ( rMesh.vecVertices.Size() > 0 && rMesh.vecIndices.Size() >= 6 )
-			CollisionTreeBuilder::WriteCollisionTree(
-			    pOutTRB, pMemStream, pSYMB,
-			    &rMesh.vecVertices[ 0 ], rMesh.vecVertices.Size(),
-			    &rMesh.vecIndices[ 0 ], rMesh.vecIndices.Size()
-			);
-	}
+	WriteCollisionSymbols( pOutTRB, pMemStream, pSYMB );
 
 	// Write the main TTMD header (Windows) and information about the LODs
 	const TINT iNumLODs = pModel->iLODCount;
@@ -556,12 +560,11 @@ TBOOL ModelResourceView::OnSaveWorld( PTRB* pOutTRB )
 
 	pSYMB->Add( pMemStream, "Materials", pTRBMaterialsHeader.get() );
 
-	// World/grass still need a Collision symbol (empty for terrain LODs) - the loader does
-	// GetSymbol("Collision")->m_iNumMeshes unconditionally and null-derefs without it
-	auto pTRBCollision          = pMemStream->Alloc<TTMDBase::CollisionHeader>();
-	pTRBCollision->m_iNumMeshes = pOutTRB->ConvertEndianess( pModel->iNumCollisionMeshes );
-	pTRBCollision->m_pMeshes    = TNULL;
-	pSYMB->Add( pMemStream, "Collision", pTRBCollision.get() );
+	// World props (barn objects, gates, race markers, ...) carry real collision; terrain
+	// world/grass LODs have none (empty header). WriteCollisionSymbols handles both, and
+	// bakes the CollisionTree when there is geometry. The Collision symbol is always emitted
+	// because the loader does GetSymbol("Collision")->m_iNumMeshes and null-derefs without it
+	WriteCollisionSymbols( pOutTRB, pMemStream, pSYMB );
 
 	// Header + Database: the world geometry, tiled into chunks
 	return WorldModelBuilder::WriteWorldModel( pOutTRB, pMemStream, pSYMB, pModel.Get(), m_fWorldChunkSize );
