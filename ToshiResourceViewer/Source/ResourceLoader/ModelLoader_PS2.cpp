@@ -162,7 +162,7 @@ static void ModelLoader_LoadStaticInstanceLOD_Barnyard_PS2(
 				dst.Position = TVector3( pPosData[ v * 3 + 0 ], pPosData[ v * 3 + 1 ], pPosData[ v * 3 + 2 ] );
 				dst.Position.Multiply( TTMDPS2::StaticInstance::POSITION_SCALE );
 
-				const TFLOAT flLightIntensity = pColorData[ v ] / 255.0f;
+				const TFLOAT flLightIntensity = TMath::Max( pColorData[ v ] - 128, 0 ) / 128.0f;
 
 				dst.Normal                  = TVector3( 0.0f, 0.0f, 0.0f );
 				dst.Color                   = TVector3( flLightIntensity, flLightIntensity, flLightIntensity );
